@@ -489,7 +489,12 @@ function saveSettingsForm() {
 
 // ── Init ──────────────────────────────────────────────────
 function init() {
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {})
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .register('sw.js', { updateViaCache: 'none' })
+      .then(reg => reg.update())
+      .catch(() => {})
+  }
 
   // Capture
   document.getElementById('save-btn').addEventListener('click', saveEntry)
