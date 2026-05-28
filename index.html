@@ -136,6 +136,18 @@
             <label>API Base URL <span class="label-hint">（可改为代理地址）</span></label>
             <input type="url" id="setting-base-url" placeholder="https://api.deepseek.com">
           </div>
+
+          <p class="settings-section-label">多设备同步</p>
+          <div class="form-group">
+            <label>同步邮箱</label>
+            <input type="email" id="setting-sync-email" placeholder="you@example.com">
+          </div>
+          <div class="sync-actions">
+            <button id="sync-sign-in-btn" class="secondary-btn">发送登录邮件</button>
+            <button id="sync-sign-out-btn" class="ghost-btn" type="button">退出同步</button>
+          </div>
+          <p id="sync-status" class="sync-status">未配置同步</p>
+
           <button id="save-settings-btn" class="primary-btn" style="margin-top:8px">保存</button>
         </div>
       </div>

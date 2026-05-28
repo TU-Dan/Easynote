@@ -453,6 +453,10 @@ html, body {
 .form-hint { font-size: 12px; color: var(--text2); line-height: 1.5; }
 .primary-btn { padding: 13px; background: var(--text); color: var(--bg); border: none; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; width: 100%; }
 .primary-btn:active { opacity: .7; }
+.secondary-btn { padding: 10px 12px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.sync-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.sync-actions .secondary-btn { flex: 1; }
+.sync-status { color: var(--text2); font-size: 12px; line-height: 1.5; margin-bottom: 16px; }
 
 /* ── Toast ── */
 .toast {

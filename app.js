@@ -1,16 +1,113 @@
 import { generateDailySummary, extractAllFromSummary } from './api.js'
+import { configureSync, signInToSync, signOutOfSync, pullSyncState, pushSyncState } from './supabase-sync.js'
+import { SUPABASE_CONFIG } from './supabase-config.js'
 
 // ── Storage ───────────────────────────────────────────────
 const K = { entries: 'qsj_entries', settings: 'qsj_settings', summaries: 'qsj_summaries', kanban: 'qsj_kanban' }
+function readJson(key, fallback) {
+  return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
+}
+function writeJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value))
+  queueSync()
+}
 const db = {
-  getEntries:   () => JSON.parse(localStorage.getItem(K.entries)   || '[]'),
-  saveEntries:  v  => localStorage.setItem(K.entries,   JSON.stringify(v)),
-  getSettings:  () => JSON.parse(localStorage.getItem(K.settings)  || '{}'),
-  saveSettings: v  => localStorage.setItem(K.settings,  JSON.stringify(v)),
-  getSummaries: () => JSON.parse(localStorage.getItem(K.summaries) || '{}'),
-  saveSummaries:v  => localStorage.setItem(K.summaries, JSON.stringify(v)),
-  getKanban:    () => JSON.parse(localStorage.getItem(K.kanban)    || '[]'),
-  saveKanban:   v  => localStorage.setItem(K.kanban,    JSON.stringify(v))
+  getEntries:   () => readJson(K.entries, []),
+  saveEntries:  v  => writeJson(K.entries, v),
+  getSettings:  () => readJson(K.settings, {}),
+  saveSettings: v  => writeJson(K.settings, v),
+  getSummaries: () => readJson(K.summaries, {}),
+  saveSummaries:v  => writeJson(K.summaries, v),
+  getKanban:    () => readJson(K.kanban, []),
+  saveKanban:   v  => writeJson(K.kanban, v)
+}
+
+// ── Supabase sync ─────────────────────────────────────────
+let syncReady = false
+let syncTimer = null
+let applyingRemoteState = false
+
+function syncableSettings(settings = db.getSettings()) {
+  return {
+    apiKey: settings.apiKey || '',
+    baseUrl: settings.baseUrl || ''
+  }
+}
+
+function getLocalState() {
+  return {
+    entries: db.getEntries(),
+    summaries: db.getSummaries(),
+    kanban: db.getKanban(),
+    settings: syncableSettings()
+  }
+}
+
+function mergeById(localItems, remoteItems) {
+  const merged = new Map()
+  for (const item of localItems || []) merged.set(item.id, item)
+  for (const item of remoteItems || []) merged.set(item.id, { ...merged.get(item.id), ...item })
+  return [...merged.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+}
+
+function mergeSummaries(localSummaries = {}, remoteSummaries = {}) {
+  const merged = { ...localSummaries }
+  for (const [date, remote] of Object.entries(remoteSummaries)) {
+    const local = merged[date]
+    if (!local || (remote?.ts || 0) >= (local?.ts || 0)) merged[date] = remote
+  }
+  return merged
+}
+
+function mergeState(localState, remoteState) {
+  if (!remoteState) return localState
+  return {
+    entries: mergeById(localState.entries, remoteState.entries),
+    summaries: mergeSummaries(localState.summaries, remoteState.summaries),
+    kanban: mergeById(localState.kanban, remoteState.kanban),
+    settings: {
+      ...localState.settings,
+      ...syncableSettings(remoteState.settings || {})
+    }
+  }
+}
+
+function replaceLocalState(nextState) {
+  const localSettings = db.getSettings()
+
+  writeJson(K.entries, nextState.entries || [])
+  writeJson(K.summaries, nextState.summaries || {})
+  writeJson(K.kanban, nextState.kanban || [])
+  writeJson(K.settings, {
+    ...localSettings,
+    ...syncableSettings(nextState.settings || {}),
+    syncEmail: localSettings.syncEmail || ''
+  })
+}
+
+function applyRemoteState(remoteState) {
+  if (!remoteState || !syncReady) return
+  applyingRemoteState = true
+  replaceLocalState(remoteState)
+  applyingRemoteState = false
+  renderAll()
+}
+
+function queueSync(delay = 900) {
+  if (!syncReady || applyingRemoteState) return
+  clearTimeout(syncTimer)
+  syncTimer = setTimeout(async () => {
+    try {
+      await pushSyncState(getLocalState())
+    } catch (err) {
+      setSyncStatus(`同步失败：${err.message}`)
+    }
+  }, delay)
+}
+
+function setSyncStatus(text) {
+  const el = document.getElementById('sync-status')
+  if (el) el.textContent = text
 }
 
 // ── Helpers ───────────────────────────────────────────────
@@ -474,16 +571,94 @@ function openSettings() {
   const s = db.getSettings()
   document.getElementById('setting-api-key').value  = s.apiKey  || ''
   document.getElementById('setting-base-url').value = s.baseUrl || ''
+  document.getElementById('setting-sync-email').value = s.syncEmail || ''
   document.getElementById('settings-modal').hidden       = false
 }
 function closeSettings() { document.getElementById('settings-modal').hidden = true }
-function saveSettingsForm() {
+async function saveSettingsForm() {
+  const prev = db.getSettings()
   db.saveSettings({
+    ...prev,
     apiKey:  document.getElementById('setting-api-key').value.trim(),
-    baseUrl: document.getElementById('setting-base-url').value.trim()
+    baseUrl: document.getElementById('setting-base-url').value.trim(),
+    syncEmail: document.getElementById('setting-sync-email').value.trim()
   })
+  await initSync()
   closeSettings()
   toast('设置已保存')
+}
+
+async function initSync() {
+  syncReady = false
+
+  try {
+    const user = await configureSync({
+      url: SUPABASE_CONFIG.url,
+      anonKey: SUPABASE_CONFIG.anonKey,
+      onStatus: setSyncStatus,
+      onRemoteState: applyRemoteState
+    })
+
+    if (!user) return
+    const localState = getLocalState()
+    const remoteState = await pullSyncState()
+    const nextState = mergeState(localState, remoteState)
+
+    syncReady = true
+    applyingRemoteState = true
+    replaceLocalState(nextState)
+    applyingRemoteState = false
+    renderAll()
+    queueSync(100)
+  } catch (err) {
+    setSyncStatus(`同步不可用：${err.message}`)
+  }
+}
+
+async function handleSyncSignIn() {
+  const settings = {
+    ...db.getSettings(),
+    syncEmail: document.getElementById('setting-sync-email').value.trim()
+  }
+  db.saveSettings(settings)
+
+  if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) {
+    toast('应用还没有配置 Supabase')
+    return
+  }
+
+  const email = settings.syncEmail
+  if (!email) { toast('请输入同步邮箱'); return }
+
+  try {
+    await configureSync({
+      url: SUPABASE_CONFIG.url,
+      anonKey: SUPABASE_CONFIG.anonKey,
+      onStatus: setSyncStatus,
+      onRemoteState: applyRemoteState
+    })
+    await signInToSync(email)
+    setSyncStatus('登录邮件已发送')
+    toast('请打开邮件完成登录')
+  } catch (err) {
+    toast(`发送失败：${err.message}`, 4000)
+  }
+}
+
+async function handleSyncSignOut() {
+  try {
+    syncReady = false
+    await signOutOfSync()
+    toast('已退出同步')
+  } catch (err) {
+    toast(`退出失败：${err.message}`, 4000)
+  }
+}
+
+function renderAll() {
+  renderRecent()
+  if (activeTab === 'today') renderToday()
+  if (activeTab === 'kanban') renderKanban()
 }
 
 
@@ -560,6 +735,8 @@ function init() {
   document.getElementById('close-settings-btn').addEventListener('click', closeSettings)
   document.getElementById('modal-backdrop').addEventListener('click', closeSettings)
   document.getElementById('save-settings-btn').addEventListener('click', saveSettingsForm)
+  document.getElementById('sync-sign-in-btn').addEventListener('click', handleSyncSignIn)
+  document.getElementById('sync-sign-out-btn').addEventListener('click', handleSyncSignOut)
 
   document.getElementById('today-summary-text').addEventListener('input', e => {
     e.target.style.height = 'auto'
@@ -567,6 +744,7 @@ function init() {
   })
 
   renderRecent()
+  initSync()
   setTimeout(() => document.getElementById('capture-input').focus(), 150)
 }
 
