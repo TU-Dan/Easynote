@@ -476,11 +476,12 @@ function renderKanban() {
   }
   empty.hidden = true
 
-  list.innerHTML = cards.map(card => {
+  list.innerHTML = cards.map((card, idx) => {
     const icon = TYPE_ICONS[card.type]
     const isTodo = card.type === 'todo'
+    const priority = kanbanStatusFilter === 'open' && idx < 3 ? idx + 1 : 0
     return `
-      <div class="k-card" data-id="${card.id}" data-type="${card.type}">
+      <div class="k-card" data-id="${card.id}" data-type="${card.type}"${priority ? ` data-priority="${priority}"` : ''}>
         <div class="k-del-bg">
           <button class="k-del-btn js-k-del" data-id="${card.id}">删除</button>
         </div>
