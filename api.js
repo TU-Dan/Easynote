@@ -2,10 +2,13 @@ async function callDeepSeek(messages, settings, options = {}) {
   const base = (settings.baseUrl || 'https://api.deepseek.com').replace(/\/$/, '')
   const controller = options.controller || new AbortController()
   let timedOut = false
+
+  // Overall timeout: 40s — enough for any reasonable response
   const timeout = setTimeout(() => {
     timedOut = true
     controller.abort()
-  }, 120000)
+  }, 40000)
+
   let res
   try {
     res = await fetch(`${base}/chat/completions`, {
@@ -16,9 +19,8 @@ async function callDeepSeek(messages, settings, options = {}) {
         'Authorization': `Bearer ${settings.apiKey}`
       },
       body: JSON.stringify({
-        model: settings.model || 'deepseek-v4-flash',
+        model: settings.model || 'deepseek-chat',
         messages,
-        thinking: { type: 'disabled' },
         temperature: 0.2,
         max_tokens: 900,
         stream: true
@@ -27,37 +29,34 @@ async function callDeepSeek(messages, settings, options = {}) {
   } catch (err) {
     clearTimeout(timeout)
     if (err.name === 'AbortError') {
-      const abortErr = new Error(timedOut ? 'AI 接口响应超过 2 分钟，请稍后重试' : '已取消生成')
-      abortErr.name = 'AbortError'
-      throw abortErr
+      throw Object.assign(new Error(timedOut ? '连接超时，请检查网络后重试' : '已取消'), { name: 'AbortError' })
     }
-    throw new Error(`无法连接 AI 接口，请检查网络或 API Base URL（${err.message}）`)
+    throw new Error(`无法连接 AI 接口（${err.message}）`)
   }
 
   if (!res.ok) {
     clearTimeout(timeout)
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error?.message || `API 错误 ${res.status}`)
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error?.message || `API 错误 ${res.status}`)
   }
 
   let content
   try {
-    content = await readDeepSeekStream(res, options.onChunk)
+    content = await readDeepSeekStream(res, options.onChunk, controller, () => { timedOut = true })
   } catch (err) {
     if (err.name === 'AbortError') {
-      const abortErr = new Error(timedOut ? 'AI 接口响应超过 2 分钟，请稍后重试' : '已取消生成')
-      abortErr.name = 'AbortError'
-      throw abortErr
+      throw Object.assign(new Error(timedOut ? '响应超时，请重试' : '已取消'), { name: 'AbortError' })
     }
     throw err
   } finally {
     clearTimeout(timeout)
   }
-  if (!content) throw new Error('AI 接口返回为空，请稍后重试')
+
+  if (!content) throw new Error('AI 返回内容为空，请重试')
   return content
 }
 
-async function readDeepSeekStream(res, onChunk) {
+async function readDeepSeekStream(res, onChunk, controller, onTimeout) {
   if (!res.body) {
     const data = await res.json()
     return data.choices?.[0]?.message?.content || ''
@@ -67,27 +66,39 @@ async function readDeepSeekStream(res, onChunk) {
   const decoder = new TextDecoder()
   let buffer = ''
   let content = ''
+  let firstChunk = false
 
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
+  // First-byte timeout: if nothing arrives within 12s, the API is likely stuck
+  const firstByteTimer = setTimeout(() => {
+    if (!firstChunk) { onTimeout?.(); controller.abort() }
+  }, 12000)
 
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
 
-    for (const rawLine of lines) {
-      const line = rawLine.trim()
-      if (!line.startsWith('data:')) continue
-      const payload = line.slice(5).trim()
-      if (!payload || payload === '[DONE]') continue
+      firstChunk = true
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
 
-      const data = JSON.parse(payload)
-      const delta = data.choices?.[0]?.delta?.content || ''
-      if (!delta) continue
-      content += delta
-      onChunk?.(delta, content)
+      for (const rawLine of lines) {
+        const line = rawLine.trim()
+        if (!line.startsWith('data:')) continue
+        const payload = line.slice(5).trim()
+        if (!payload || payload === '[DONE]') continue
+        try {
+          const data = JSON.parse(payload)
+          const delta = data.choices?.[0]?.delta?.content || ''
+          if (!delta) continue
+          content += delta
+          onChunk?.(delta, content)
+        } catch { /* skip malformed chunk */ }
+      }
     }
+  } finally {
+    clearTimeout(firstByteTimer)
   }
 
   return content
