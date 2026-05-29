@@ -170,8 +170,15 @@ function toast(msg, ms = 2200) {
 let activeTab = 'capture'
 let kanbanFilter = 'todo'
 let kanbanDateFilter = 'all'
+let kanbanStatusFilter = 'open'
 let authMode = 'login'
 let pendingConfirmationEmail = ''
+let summaryLoadingTimer = null
+let summaryProgressTimer = null
+let summaryProgress = 0
+let summaryController = null
+let summaryGenerating = false
+let summaryStreamingText = ''
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tab) {
@@ -226,6 +233,19 @@ function renderTodaySummaryArea() {
   const today = todayKey()
   const entries = db.getEntries().filter(e => e.date === today)
   const saved = db.getSummaries()[today]
+
+  if (summaryGenerating) {
+    document.getElementById('today-summary-idle').hidden = true
+    document.getElementById('today-summary-loading').hidden = false
+    document.getElementById('today-summary-result').hidden = true
+    document.getElementById('today-gen-btn').disabled = true
+    document.getElementById('today-nav-progress').hidden = false
+    setSummaryProgress(summaryProgress)
+    renderStreamingSummary(summaryStreamingText)
+    document.getElementById('today-entry-count').textContent =
+      entries.length ? `今日已记录 ${entries.length} 条` : '今天还没有记录'
+    return
+  }
 
   document.getElementById('today-summary-idle').hidden    = !!saved
   document.getElementById('today-summary-loading').hidden = true
@@ -285,22 +305,100 @@ async function handleGenerateSummary() {
   document.getElementById('today-summary-idle').hidden    = true
   document.getElementById('today-summary-result').hidden  = true
   document.getElementById('today-summary-loading').hidden = false
+  document.getElementById('today-nav-progress').hidden = false
+  document.getElementById('today-gen-btn').disabled = true
+  document.getElementById('today-summary-loading-text').textContent = '正在归纳今天的内容...'
+  summaryGenerating = true
+  summaryStreamingText = ''
+  renderStreamingSummary('')
+  setSummaryProgress(4)
+  startSummaryProgress()
+  summaryController = new AbortController()
+  clearTimeout(summaryLoadingTimer)
+  summaryLoadingTimer = setTimeout(() => {
+    document.getElementById('today-summary-loading-text').textContent = 'AI 还在处理，内容较多时会慢一些...'
+  }, 18000)
 
   try {
-    const text = await generateDailySummary(entries, settings, today)
+    const text = await generateDailySummary(entries, {
+      ...settings,
+      controller: summaryController,
+      onChunk: (_chunk, content) => {
+        if (!summaryGenerating) return
+        summaryStreamingText = content
+        renderStreamingSummary(summaryStreamingText)
+        if (summaryProgress < 35) setSummaryProgress(35)
+        const generatedLength = content.trim().length
+        if (generatedLength > 40) {
+          document.getElementById('today-summary-loading-text').textContent =
+            `正在生成总结，已收到 ${generatedLength} 字...`
+          setSummaryProgress(Math.min(96, 35 + Math.floor(generatedLength / 18)))
+        } else {
+          document.getElementById('today-summary-loading-text').textContent = 'AI 已开始生成...'
+        }
+      }
+    }, today)
+    setSummaryProgress(100)
     const summaries = db.getSummaries()
     summaries[today] = { text, ts: Date.now() }
     db.saveSummaries(summaries)
+    toast('今日总结已生成 ✓')
+    summaryGenerating = false
+    summaryStreamingText = ''
     document.getElementById('today-summary-loading').hidden = true
     document.getElementById('today-summary-result').hidden  = false
     document.getElementById('today-summary-preview').innerHTML = md2html(text)
     document.getElementById('today-summary-text').value = text
     showSummaryPreview()
   } catch (err) {
+    summaryGenerating = false
+    summaryStreamingText = ''
+    toast(err.name === 'AbortError' ? err.message : `生成失败: ${err.message}`, 4000)
+  } finally {
+    clearTimeout(summaryLoadingTimer)
+    stopSummaryProgress()
+    summaryController = null
     document.getElementById('today-summary-loading').hidden = true
-    document.getElementById('today-summary-idle').hidden    = false
-    toast(`生成失败: ${err.message}`, 4000)
+    document.getElementById('today-nav-progress').hidden = true
+    document.getElementById('today-gen-btn').disabled = false
+    renderStreamingSummary('')
+    const hasSummary = !!db.getSummaries()[today]
+    document.getElementById('today-summary-idle').hidden = hasSummary
+    document.getElementById('today-summary-result').hidden = !hasSummary
   }
+}
+
+function renderStreamingSummary(text) {
+  const preview = document.getElementById('today-summary-stream')
+  if (!preview) return
+  preview.hidden = !text.trim()
+  preview.innerHTML = text.trim() ? md2html(text) : ''
+}
+
+function setSummaryProgress(value) {
+  summaryProgress = Math.max(0, Math.min(100, Math.round(value)))
+  document.getElementById('today-summary-progress-text').textContent = `${summaryProgress}%`
+  document.getElementById('today-summary-progress-bar').style.width = `${summaryProgress}%`
+  document.getElementById('today-nav-progress').textContent = `${summaryProgress}%`
+}
+
+function startSummaryProgress() {
+  clearInterval(summaryProgressTimer)
+  summaryProgressTimer = setInterval(() => {
+    const remaining = 92 - summaryProgress
+    if (remaining <= 0) return
+    const step = summaryProgress < 35 ? 4 : summaryProgress < 70 ? 2 : 1
+    setSummaryProgress(summaryProgress + Math.min(step, remaining))
+  }, 1400)
+}
+
+function stopSummaryProgress() {
+  clearInterval(summaryProgressTimer)
+  summaryProgressTimer = null
+}
+
+function cancelSummaryGeneration() {
+  if (summaryController) summaryController.abort()
 }
 
 // ── Today: add to kanban ──────────────────────────────────
@@ -332,6 +430,7 @@ function handleAddToKanban() {
 
 // ── Kanban ────────────────────────────────────────────────
 const TYPE_ICONS = { todo: null, reminder: '⏰', quote: '💬', thought: '💭' }
+const FILTER_LABELS = { todo: 'Todo', reminder: '提醒', quote: '好句', thought: '感触', all: '全部' }
 
 function weekStartKey() {
   const d = new Date()
@@ -346,11 +445,12 @@ function renderKanban() {
   let cards = kanbanFilter === 'all' ? allCards : allCards.filter(c => c.type === kanbanFilter)
   if (kanbanDateFilter === 'today') cards = cards.filter(c => c.date === todayKey())
   else if (kanbanDateFilter === 'week') { const ws = weekStartKey(); cards = cards.filter(c => c.date >= ws) }
+  cards = kanbanStatusFilter === 'done' ? cards.filter(c => c.done) : cards.filter(c => !c.done)
   const list     = document.getElementById('kanban-list')
   const empty    = document.getElementById('kanban-empty')
   const clearBtn = document.getElementById('kanban-clear-done-btn')
 
-  clearBtn.hidden = !allCards.some(c => c.done)
+  clearBtn.hidden = kanbanStatusFilter !== 'done' || !allCards.some(c => c.done)
 
   if (!cards.length) {
     list.innerHTML = ''
@@ -768,6 +868,7 @@ function init() {
 
   // Today: summary
   document.getElementById('today-gen-btn').addEventListener('click', handleGenerateSummary)
+  document.getElementById('today-summary-cancel-btn').addEventListener('click', cancelSummaryGeneration)
   document.getElementById('today-regen-btn').addEventListener('click', () => {
     const today = todayKey()
     const s = db.getSummaries()
@@ -791,20 +892,44 @@ function init() {
   })
 
   // Kanban type filter
+  document.getElementById('kanban-filter-trigger').addEventListener('click', () => {
+    const menu = document.getElementById('kanban-filters')
+    const nextHidden = !menu.hidden
+    menu.hidden = nextHidden
+    document.getElementById('kanban-filter-trigger').setAttribute('aria-expanded', String(!nextHidden))
+  })
   document.getElementById('kanban-filters').addEventListener('click', e => {
-    const btn = e.target.closest('.k-filter-btn')
+    const btn = e.target.closest('.tag-filter-option')
     if (!btn) return
     kanbanFilter = btn.dataset.filter
-    document.querySelectorAll('#kanban-filters .k-filter-btn').forEach(b => b.classList.toggle('active', b === btn))
+    document.getElementById('kanban-filter-label').textContent = FILTER_LABELS[kanbanFilter] || kanbanFilter
+    document.querySelectorAll('#kanban-filters .tag-filter-option').forEach(b => b.classList.toggle('active', b === btn))
+    document.getElementById('kanban-filters').hidden = true
+    document.getElementById('kanban-filter-trigger').setAttribute('aria-expanded', 'false')
     renderKanban()
+  })
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.tag-filter')) {
+      document.getElementById('kanban-filters').hidden = true
+      document.getElementById('kanban-filter-trigger').setAttribute('aria-expanded', 'false')
+    }
   })
 
   // Kanban date filter
   document.getElementById('kanban-date-filters').addEventListener('click', e => {
-    const btn = e.target.closest('.k-filter-btn')
+    const btn = e.target.closest('.date-segment-btn')
     if (!btn) return
     kanbanDateFilter = btn.dataset.date
-    document.querySelectorAll('#kanban-date-filters .k-filter-btn').forEach(b => b.classList.toggle('active', b === btn))
+    document.querySelectorAll('#kanban-date-filters .date-segment-btn').forEach(b => b.classList.toggle('active', b === btn))
+    renderKanban()
+  })
+
+  // Kanban status filter
+  document.getElementById('kanban-status-filters').addEventListener('click', e => {
+    const btn = e.target.closest('.status-filter-btn')
+    if (!btn) return
+    kanbanStatusFilter = btn.dataset.status
+    document.querySelectorAll('#kanban-status-filters .status-filter-btn').forEach(b => b.classList.toggle('active', b === btn))
     renderKanban()
   })
 
@@ -826,6 +951,7 @@ function init() {
     e.target.style.height = e.target.scrollHeight + 'px'
   })
 
+  document.getElementById('capture-today-label').textContent = todayLabel()
   setAuthMode('login')
   initAuth()
 }
