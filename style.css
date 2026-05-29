@@ -619,9 +619,9 @@ html, body {
 .k-drag:active { cursor: grabbing; }
 
 /* Top-3 priority accent */
-.k-card[data-priority="1"] .k-inner { border-left: 2px solid #FF9500; }
-.k-card[data-priority="2"] .k-inner { border-left: 2px solid rgba(255,149,0,.55); }
-.k-card[data-priority="3"] .k-inner { border-left: 2px solid rgba(255,149,0,.28); }
+.k-card[data-priority="1"] .k-inner { border-left: 2px solid #00C9B1; }
+.k-card[data-priority="2"] .k-inner { border-left: 2px solid rgba(0,201,177,.55); }
+.k-card[data-priority="3"] .k-inner { border-left: 2px solid rgba(0,201,177,.28); }
 
 .k-card.k-dragging {
   position: fixed;
