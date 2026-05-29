@@ -412,18 +412,21 @@ function handleAddToKanban() {
   const summaries = db.getSummaries()
   if (summaries[today]) { summaries[today].text = text; db.saveSummaries(summaries) }
 
-  const kanban = db.getKanban()
+  // Remove previous AI-generated items from today — latest summary wins
+  const kanban = db.getKanban().filter(c => !(c.source === 'summary' && c.date === today))
+
   let added = 0
   for (const item of items) {
+    // Still dedup against manually-added items from other days
     if (!kanban.some(c => textSimilarity(c.text, item.text) >= 0.65)) {
-      kanban.push({ id: crypto.randomUUID(), text: item.text, type: item.type, done: false, date: today })
+      kanban.push({ id: crypto.randomUUID(), text: item.text, type: item.type, done: false, date: today, source: 'summary' })
       added++
     }
   }
   db.saveKanban(kanban)
 
-  if (added === 0) { toast('这些事项已在看板中'); return }
-  toast(`已加入 ${added} 项到看板 ✓`)
+  if (added === 0) { toast('没有新事项'); return }
+  toast(`已更新看板，共 ${added} 项 ✓`)
   switchTab('kanban')
 }
 
