@@ -169,12 +169,13 @@ function toast(msg, ms = 2200) {
 // ── State ─────────────────────────────────────────────────
 let activeTab = 'capture'
 let kanbanFilter = 'todo'
-let kanbanDateFilter = 'today'
-let kanbanDateFrom = null
-let kanbanDateTo   = null
+let kanbanDateFilter    = 'today'
+let kanbanDateFrom      = null
+let kanbanDateTo        = null
+let prevKanbanDateFilter = 'today'
 let calYear  = new Date().getFullYear()
 let calMonth = new Date().getMonth()
-let calStart = null
+let calStart = null   // temporary selection inside the calendar
 let calEnd   = null
 let kanbanStatusFilter = 'open'
 let authMode = 'login'
@@ -691,12 +692,43 @@ function updateOtherBtnLabel() {
 function openCalendar() {
   calYear  = new Date().getFullYear()
   calMonth = new Date().getMonth()
+  // Initialise temp selection from committed range
+  calStart = kanbanDateFrom || null
+  calEnd   = kanbanDateTo   || null
   renderCalendar()
   document.getElementById('cal-overlay').hidden = false
 }
 
 function closeCalendar() {
   document.getElementById('cal-overlay').hidden = true
+}
+
+function cancelCalendar() {
+  closeCalendar()
+  // Restore previous filter if no range was ever committed for 'other'
+  if (!kanbanDateFrom) {
+    kanbanDateFilter = prevKanbanDateFilter
+    document.querySelectorAll('#kanban-date-filters .date-segment-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.date === kanbanDateFilter)
+    )
+    updateOtherBtnLabel()
+    renderKanban()
+  }
+}
+
+function confirmCalendar() {
+  if (calStart) {
+    const s = calStart <= (calEnd || calStart) ? calStart : calEnd
+    const e = calStart <= (calEnd || calStart) ? (calEnd || calStart) : calStart
+    kanbanDateFrom = s
+    kanbanDateTo   = e
+  } else {
+    kanbanDateFrom = null
+    kanbanDateTo   = null
+  }
+  closeCalendar()
+  updateOtherBtnLabel()
+  renderKanban()
 }
 
 function renderCalendar() {
@@ -739,15 +771,7 @@ function renderCalendar() {
       } else {
         calEnd = d
       }
-      // Apply to kanban
-      if (calStart) {
-        kanbanDateFrom = calStart <= (calEnd || calStart) ? calStart : calEnd
-        kanbanDateTo   = calStart <= (calEnd || calStart) ? (calEnd || calStart) : calStart
-      } else {
-        kanbanDateFrom = null; kanbanDateTo = null
-      }
-      renderCalendar()
-      renderKanban()
+      renderCalendar()  // preview only — apply on 完成
     })
   )
 }
@@ -1015,7 +1039,10 @@ function init() {
     if (!btn) return
     kanbanDateFilter = btn.dataset.date
     document.querySelectorAll('#kanban-date-filters .date-segment-btn').forEach(b => b.classList.toggle('active', b === btn))
-    if (kanbanDateFilter === 'other') { openCalendar(); return }
+    if (kanbanDateFilter === 'other') {
+      prevKanbanDateFilter = document.querySelector('#kanban-date-filters .date-segment-btn.active:not([data-date="other"])')?.dataset.date || 'today'
+      openCalendar(); return
+    }
     updateOtherBtnLabel()
     renderKanban()
   })
@@ -1028,8 +1055,9 @@ function init() {
     calMonth++; if (calMonth > 11) { calMonth = 0; calYear++ }
     renderCalendar()
   })
-  document.getElementById('cal-close').addEventListener('click', () => { closeCalendar(); updateOtherBtnLabel(); renderKanban() })
-  document.getElementById('cal-backdrop').addEventListener('click', () => { closeCalendar(); updateOtherBtnLabel(); renderKanban() })
+  document.getElementById('cal-close').addEventListener('click', cancelCalendar)
+  document.getElementById('cal-confirm').addEventListener('click', confirmCalendar)
+  document.getElementById('cal-backdrop').addEventListener('click', cancelCalendar)
 
   // Kanban status filter
   document.getElementById('kanban-status-filters').addEventListener('click', e => {
