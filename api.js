@@ -117,7 +117,7 @@ export function buildDailySummaryPrompt(entries, date, kanban = []) {
   const openItems = kanban.filter(c => !c.done)
   const doneItems = kanban.filter(c => c.done)
   const kanbanSection = (openItems.length || doneItems.length) ? `
-当前看板状态（已在追踪，无需重复列出）：
+看板现有状态（仅供参考，用于判断完成情况，不要因此跳过今日记录）：
 ${openItems.length ? `待完成：\n${openItems.map(c => `- ${c.text}`).join('\n')}` : ''}
 ${doneItems.length ? `已完成：\n${doneItems.map(c => `- ${c.text}`).join('\n')}` : ''}
 ---
