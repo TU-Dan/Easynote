@@ -191,7 +191,7 @@ export function extractAllFromSummary(text) {
   ]
 
   const items = []
-  for (const { emoji, type } of sections) {
+  for (const { emoji, type, done } of sections) {
     const re = new RegExp(`###[^\\n]*${emoji}[^\\n]*\\n([\\s\\S]*?)(?=###|$)`)
     const match = text.match(re)
     if (!match) continue

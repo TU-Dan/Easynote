@@ -395,8 +395,12 @@ function handleAddToKanban() {
   db.saveKanban(kanban)
 
   if (added === 0) { toast('没有新事项'); return }
-  toast(`已更新看板，共 ${added} 项 ✓`)
-  switchTab('kanban')
+  const doneAdded = items.filter(i => i.done).length
+  const msg = doneAdded
+    ? `已加入 ${added} 项（含 ${doneAdded} 项已完成）✓`
+    : `已加入 ${added} 项到看板 ✓`
+  toast(msg, 2500)
+  setTimeout(() => switchTab('kanban'), 800)
 }
 
 
