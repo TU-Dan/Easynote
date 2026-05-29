@@ -412,8 +412,11 @@ function handleAddToKanban() {
   const summaries = db.getSummaries()
   if (summaries[today]) { summaries[today].text = text; db.saveSummaries(summaries) }
 
-  // Remove previous AI-generated items from today — latest summary wins
-  const kanban = db.getKanban().filter(c => !(c.source === 'summary' && c.date === today))
+  // Remove today's AI-generated items — latest summary wins.
+  // Items without a source field are legacy summary items (added before source tracking).
+  const kanban = db.getKanban().filter(c =>
+    !(c.date === today && (c.source === 'summary' || !c.source))
+  )
 
   let added = 0
   for (const item of items) {
