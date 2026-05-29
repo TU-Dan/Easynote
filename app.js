@@ -57,6 +57,41 @@ function mergeById(localItems, remoteItems) {
   return [...merged.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
 }
 
+function normalizeKanbanText(text = '') {
+  return text
+    .replace(/\*\*/g, '')
+    .replace(/[，。！？、；：,.!?;:()[\]（）【】"'“”‘’]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+function kanbanSemanticKey(card) {
+  return [
+    card.date || '',
+    card.type || '',
+    card.done ? 'done' : 'open',
+    normalizeKanbanText(card.text)
+  ].join('|')
+}
+
+function dedupeKanbanCards(cards = []) {
+  const byKey = new Map()
+  for (const card of cards) {
+    const key = kanbanSemanticKey(card)
+    const existing = byKey.get(key)
+    if (!existing) {
+      byKey.set(key, card)
+      continue
+    }
+
+    const existingScore = (existing.source === 'summary' ? 2 : 1) + (existing.id ? 1 : 0)
+    const cardScore = (card.source === 'summary' ? 2 : 1) + (card.id ? 1 : 0)
+    if (cardScore > existingScore) byKey.set(key, { ...existing, ...card })
+  }
+  return [...byKey.values()]
+}
+
 function mergeSummaries(localSummaries = {}, remoteSummaries = {}) {
   const merged = { ...localSummaries }
   for (const [date, remote] of Object.entries(remoteSummaries)) {
@@ -71,7 +106,7 @@ function mergeState(localState, remoteState) {
   return {
     entries: mergeById(localState.entries, remoteState.entries),
     summaries: mergeSummaries(localState.summaries, remoteState.summaries),
-    kanban: mergeById(localState.kanban, remoteState.kanban),
+    kanban: dedupeKanbanCards(mergeById(localState.kanban, remoteState.kanban)),
     settings: {
       ...localState.settings,
       ...syncableSettings(remoteState.settings || {})
@@ -385,26 +420,58 @@ function handleAddToKanban() {
   const summaries = db.getSummaries()
   if (summaries[today]) { summaries[today].text = text; db.saveSummaries(summaries) }
 
-  // Keep only manually-added items (not today's summary items)
-  const existing = db.getKanban().filter(c =>
+  const allCards = dedupeKanbanCards(db.getKanban())
+  const reusableSummaryCards = allCards.filter(c =>
+    c.date === today && (c.source === 'summary' || !c.source)
+  )
+  const existing = allCards.filter(c =>
     !(c.date === today && (c.source === 'summary' || !c.source))
   )
 
-  // Dedup only against pre-existing items — items in the current batch
-  // must NOT dedup each other (todo + done version of same task both belong)
-  let added = 0, doneAdded = 0
+  let added = 0, updated = 0
   const newItems = []
+  const reusedIds = new Set()
+  const batchKeys = new Set()
   for (const item of items) {
-    if (!existing.some(c => textSimilarity(c.text, item.text) >= 0.65)) {
-      newItems.push({ id: crypto.randomUUID(), text: item.text, type: item.type, done: item.done ?? false, date: today, source: 'summary' })
-      added++
-      if (item.done) doneAdded++
-    }
-  }
-  db.saveKanban([...existing, ...newItems])
+    const candidate = { text: item.text, type: item.type, done: item.done ?? false, date: today }
+    const key = kanbanSemanticKey(candidate)
+    if (batchKeys.has(key)) continue
+    batchKeys.add(key)
 
-  if (added === 0) { toast('看板已是最新'); return }
-  toast('已加入看板 ✓')
+    if (existing.some(c =>
+      c.type === candidate.type &&
+      !!c.done === !!candidate.done &&
+      textSimilarity(c.text, candidate.text) >= 0.65
+    )) continue
+
+    const reusable = reusableSummaryCards.find(c =>
+      !reusedIds.has(c.id) &&
+      c.type === candidate.type &&
+      !!c.done === !!candidate.done &&
+      textSimilarity(c.text, candidate.text) >= 0.65
+    )
+    if (reusable) reusedIds.add(reusable.id)
+    if (reusable) {
+      const textChanged = reusable.text !== candidate.text
+      if (textChanged) updated++
+    } else {
+      added++
+    }
+
+    newItems.push({
+      ...(reusable || {}),
+      id: reusable?.id || crypto.randomUUID(),
+      text: candidate.text,
+      type: candidate.type,
+      done: candidate.done,
+      date: today,
+      source: 'summary'
+    })
+  }
+  db.saveKanban(dedupeKanbanCards([...existing, ...newItems]))
+
+  if (added === 0 && updated === 0) { toast('看板已是最新'); return }
+  toast(added ? '已加入看板 ✓' : '看板已更新 ✓')
   switchTab('kanban')
 }
 
@@ -525,6 +592,27 @@ function renderKanban() {
   )
 
   initKanbanGestures()
+}
+
+function syncVisibleKanbanPriorityAccents() {
+  const list = document.getElementById('kanban-list')
+  if (!list) return
+
+  let orderedCards = [...list.children].flatMap(child => {
+    if (child.classList?.contains('k-placeholder') && drag?.card) return [drag.card]
+    if (child.classList?.contains('k-card') && !child.classList.contains('k-dragging')) return [child]
+    return []
+  })
+
+  if (!orderedCards.length) orderedCards = [...list.querySelectorAll('.k-card')]
+
+  orderedCards.forEach((card, idx) => {
+    if (kanbanStatusFilter === 'open' && idx < 3) {
+      card.dataset.priority = String(idx + 1)
+    } else {
+      card.removeAttribute('data-priority')
+    }
+  })
 }
 
 // ── Kanban: swipe-to-delete + touch drag ──────────────────
@@ -656,6 +744,7 @@ function moveDrag(e) {
     }
   }
   if (!placed) drag.list.appendChild(drag.ph)
+  syncVisibleKanbanPriorityAccents()
 }
 
 function endDrag() {
@@ -671,6 +760,7 @@ function endDrag() {
   const sorted = newOrder.map(id => all.find(c => c.id === id)).filter(Boolean)
   const rest   = all.filter(c => !sorted.find(s => s.id === c.id))
   db.saveKanban([...sorted, ...rest])
+  syncVisibleKanbanPriorityAccents()
 
   drag = null
   gesture = null
