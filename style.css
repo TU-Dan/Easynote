@@ -47,6 +47,68 @@ html, body {
   margin: 0 auto;
 }
 
+#app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ── Auth ── */
+.auth-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 28px 20px;
+}
+.auth-panel {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 22px 18px 18px;
+}
+.auth-panel h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  background: var(--surface2);
+  border-radius: 6px;
+  margin-bottom: 18px;
+}
+.auth-tab {
+  border: none;
+  border-radius: 4px;
+  padding: 9px;
+  background: transparent;
+  color: var(--text2);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.auth-tab.active {
+  background: var(--surface);
+  color: var(--text);
+}
+.auth-status {
+  min-height: 18px;
+  color: var(--text2);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 12px;
+}
+.auth-resend-btn {
+  width: 100%;
+  margin-top: 10px;
+}
+
 /* ── Header ── */
 #header {
   display: flex;
@@ -457,6 +519,7 @@ html, body {
 .sync-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .sync-actions .secondary-btn { flex: 1; }
 .sync-status { color: var(--text2); font-size: 12px; line-height: 1.5; margin-bottom: 16px; }
+.account-email { color: var(--text); font-size: 14px; line-height: 1.5; margin-bottom: 6px; word-break: break-all; }
 
 /* ── Toast ── */
 .toast {

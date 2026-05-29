@@ -144,13 +144,35 @@ export async function configureSync({ url, anonKey, onStatus, onRemoteState }) {
   return user
 }
 
-export async function signInToSync(email) {
+export async function signUpWithPassword(email, password) {
   const supabase = requireClient()
-  const { error } = await supabase.auth.signInWithOtp({
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: location.href }
+  })
+  if (error) throw error
+  currentUser = data.session?.user || data.user || null
+  return { user: currentUser, needsConfirmation: !data.session }
+}
+
+export async function resendSignupEmail(email) {
+  const supabase = requireClient()
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
     email,
     options: { emailRedirectTo: location.href }
   })
   if (error) throw error
+}
+
+export async function signInWithPassword(email, password) {
+  const supabase = requireClient()
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) throw error
+  currentUser = data.user
+  await subscribeRemoteChanges()
+  return currentUser
 }
 
 export async function signOutOfSync() {
@@ -163,6 +185,10 @@ export async function signOutOfSync() {
   if (error) throw error
   currentUser = null
   setStatus('未登录同步')
+}
+
+export function getCurrentUser() {
+  return currentUser
 }
 
 export async function pullSyncState() {

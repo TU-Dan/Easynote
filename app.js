@@ -1,5 +1,5 @@
 import { generateDailySummary, extractAllFromSummary } from './api.js'
-import { configureSync, signInToSync, signOutOfSync, pullSyncState, pushSyncState } from './supabase-sync.js'
+import { configureSync, resendSignupEmail, signInWithPassword, signUpWithPassword, signOutOfSync, getCurrentUser, pullSyncState, pushSyncState } from './supabase-sync.js'
 import { SUPABASE_CONFIG } from './supabase-config.js'
 
 // ── Storage ───────────────────────────────────────────────
@@ -20,6 +20,13 @@ const db = {
   saveSummaries:v  => writeJson(K.summaries, v),
   getKanban:    () => readJson(K.kanban, []),
   saveKanban:   v  => writeJson(K.kanban, v)
+}
+
+function clearLocalData() {
+  localStorage.removeItem(K.entries)
+  localStorage.removeItem(K.summaries)
+  localStorage.removeItem(K.kanban)
+  localStorage.removeItem(K.settings)
 }
 
 // ── Supabase sync ─────────────────────────────────────────
@@ -163,6 +170,8 @@ function toast(msg, ms = 2200) {
 let activeTab = 'capture'
 let kanbanFilter = 'todo'
 let kanbanDateFilter = 'all'
+let authMode = 'login'
+let pendingConfirmationEmail = ''
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tab) {
@@ -569,9 +578,10 @@ function showSummaryEdit() {
 // ── Settings ──────────────────────────────────────────────
 function openSettings() {
   const s = db.getSettings()
+  const user = getCurrentUser()
   document.getElementById('setting-api-key').value  = s.apiKey  || ''
   document.getElementById('setting-base-url').value = s.baseUrl || ''
-  document.getElementById('setting-sync-email').value = s.syncEmail || ''
+  document.getElementById('account-email').textContent = user?.email ? `当前账号：${user.email}` : '未登录'
   document.getElementById('settings-modal').hidden       = false
 }
 function closeSettings() { document.getElementById('settings-modal').hidden = true }
@@ -580,15 +590,14 @@ async function saveSettingsForm() {
   db.saveSettings({
     ...prev,
     apiKey:  document.getElementById('setting-api-key').value.trim(),
-    baseUrl: document.getElementById('setting-base-url').value.trim(),
-    syncEmail: document.getElementById('setting-sync-email').value.trim()
+    baseUrl: document.getElementById('setting-base-url').value.trim()
   })
-  await initSync()
+  queueSync(100)
   closeSettings()
   toast('设置已保存')
 }
 
-async function initSync() {
+async function initAuth() {
   syncReady = false
 
   try {
@@ -599,57 +608,120 @@ async function initSync() {
       onRemoteState: applyRemoteState
     })
 
-    if (!user) return
-    const localState = getLocalState()
-    const remoteState = await pullSyncState()
-    const nextState = mergeState(localState, remoteState)
-
-    syncReady = true
-    applyingRemoteState = true
-    replaceLocalState(nextState)
-    applyingRemoteState = false
-    renderAll()
-    queueSync(100)
+    if (!user) {
+      showAuthScreen()
+      return
+    }
+    await enterApp()
   } catch (err) {
-    setSyncStatus(`同步不可用：${err.message}`)
+    showAuthScreen(`登录服务不可用：${err.message}`)
   }
 }
 
-async function handleSyncSignIn() {
-  const settings = {
-    ...db.getSettings(),
-    syncEmail: document.getElementById('setting-sync-email').value.trim()
-  }
-  db.saveSettings(settings)
+async function enterApp() {
+  const localState = getLocalState()
+  const remoteState = await pullSyncState()
+  const nextState = mergeState(localState, remoteState)
 
+  syncReady = true
+  applyingRemoteState = true
+  replaceLocalState(nextState)
+  applyingRemoteState = false
+  document.getElementById('auth-screen').hidden = true
+  document.getElementById('app-shell').hidden = false
+  setSyncStatus(`已登录：${getCurrentUser()?.email || ''}`)
+  renderAll()
+  queueSync(100)
+  setTimeout(() => document.getElementById('capture-input').focus(), 150)
+}
+
+function showAuthScreen(message = '') {
+  document.getElementById('app-shell').hidden = true
+  document.getElementById('auth-screen').hidden = false
+  setAuthStatus(message)
+}
+
+function setAuthMode(mode) {
+  authMode = mode
+  document.getElementById('auth-login-tab').classList.toggle('active', mode === 'login')
+  document.getElementById('auth-register-tab').classList.toggle('active', mode === 'register')
+  document.getElementById('auth-submit-btn').textContent = mode === 'login' ? '登录' : '注册账号'
+  document.getElementById('auth-password').autocomplete = mode === 'login' ? 'current-password' : 'new-password'
+  document.getElementById('auth-resend-btn').hidden = true
+  pendingConfirmationEmail = ''
+  setAuthStatus('')
+}
+
+function setAuthStatus(text) {
+  document.getElementById('auth-status').textContent = text
+}
+
+async function handleAuthSubmit() {
   if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) {
-    toast('应用还没有配置 Supabase')
+    setAuthStatus('应用还没有配置 Supabase')
     return
   }
 
-  const email = settings.syncEmail
-  if (!email) { toast('请输入同步邮箱'); return }
+  const email = document.getElementById('auth-email').value.trim()
+  const password = document.getElementById('auth-password').value
+  if (!email) { setAuthStatus('请输入邮箱'); return }
+  if (password.length < 6) { setAuthStatus('密码至少 6 位'); return }
 
   try {
+    setAuthStatus(authMode === 'login' ? '正在登录...' : '正在注册...')
     await configureSync({
       url: SUPABASE_CONFIG.url,
       anonKey: SUPABASE_CONFIG.anonKey,
       onStatus: setSyncStatus,
       onRemoteState: applyRemoteState
     })
-    await signInToSync(email)
-    setSyncStatus('登录邮件已发送')
-    toast('请打开邮件完成登录')
+
+    if (authMode === 'register') {
+      const result = await signUpWithPassword(email, password)
+      if (result.needsConfirmation) {
+        pendingConfirmationEmail = email
+        document.getElementById('auth-resend-btn').hidden = false
+        setAuthStatus('注册请求已提交，请检查验证邮件；没有收到可重发')
+        return
+      }
+    } else {
+      await signInWithPassword(email, password)
+    }
+
+    await enterApp()
   } catch (err) {
-    toast(`发送失败：${err.message}`, 4000)
+    setAuthStatus(err.message)
   }
 }
 
-async function handleSyncSignOut() {
+async function handleResendSignupEmail() {
+  const email = pendingConfirmationEmail || document.getElementById('auth-email').value.trim()
+  if (!email) { setAuthStatus('请输入邮箱'); return }
+
+  try {
+    setAuthStatus('正在重发验证邮件...')
+    await configureSync({
+      url: SUPABASE_CONFIG.url,
+      anonKey: SUPABASE_CONFIG.anonKey,
+      onStatus: setSyncStatus,
+      onRemoteState: applyRemoteState
+    })
+    await resendSignupEmail(email)
+    pendingConfirmationEmail = email
+    setAuthStatus('验证邮件已重发，请检查收件箱和垃圾邮件')
+  } catch (err) {
+    setAuthStatus(err.message)
+  }
+}
+
+async function handleSignOut() {
   try {
     syncReady = false
     await signOutOfSync()
-    toast('已退出同步')
+    clearLocalData()
+    renderAll()
+    closeSettings()
+    showAuthScreen('已退出账号')
   } catch (err) {
     toast(`退出失败：${err.message}`, 4000)
   }
@@ -670,6 +742,18 @@ function init() {
       .then(reg => reg.update())
       .catch(() => {})
   }
+
+  // Auth
+  document.getElementById('auth-login-tab').addEventListener('click', () => setAuthMode('login'))
+  document.getElementById('auth-register-tab').addEventListener('click', () => setAuthMode('register'))
+  document.getElementById('auth-submit-btn').addEventListener('click', handleAuthSubmit)
+  document.getElementById('auth-resend-btn').addEventListener('click', handleResendSignupEmail)
+  document.getElementById('auth-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleAuthSubmit()
+  })
+  document.getElementById('auth-email').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('auth-password').focus()
+  })
 
   // Capture
   document.getElementById('save-btn').addEventListener('click', saveEntry)
@@ -735,17 +819,15 @@ function init() {
   document.getElementById('close-settings-btn').addEventListener('click', closeSettings)
   document.getElementById('modal-backdrop').addEventListener('click', closeSettings)
   document.getElementById('save-settings-btn').addEventListener('click', saveSettingsForm)
-  document.getElementById('sync-sign-in-btn').addEventListener('click', handleSyncSignIn)
-  document.getElementById('sync-sign-out-btn').addEventListener('click', handleSyncSignOut)
+  document.getElementById('sign-out-btn').addEventListener('click', handleSignOut)
 
   document.getElementById('today-summary-text').addEventListener('input', e => {
     e.target.style.height = 'auto'
     e.target.style.height = e.target.scrollHeight + 'px'
   })
 
-  renderRecent()
-  initSync()
-  setTimeout(() => document.getElementById('capture-input').focus(), 150)
+  setAuthMode('login')
+  initAuth()
 }
 
 document.addEventListener('DOMContentLoaded', init)

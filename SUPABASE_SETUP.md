@@ -14,9 +14,11 @@ export const SUPABASE_CONFIG = {
 }
 ```
 
-5. 部署应用。
-6. 用户打开轻松记 -> 设置，只需要输入自己的同步邮箱，点击“发送登录邮件”。
-7. 手机和电脑都用同一个邮箱登录后，记录、今日总结、看板和 AI 接口设置会同步。
+5. 在 Authentication -> Providers 里启用 Email，并允许邮箱密码注册登录。
+6. 在 Authentication -> URL Configuration 里加入线上域名作为 Site URL / Redirect URL。
+7. 部署应用。
+8. 用户打开轻松记后，先注册账号或登录账号。
+9. 登录后，记录、今日总结、看板和 AI 接口设置都会按用户 ID 存进 Supabase。
 
 数据表：
 
