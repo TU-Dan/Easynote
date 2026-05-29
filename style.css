@@ -740,7 +740,7 @@ html, body {
 .empty-sub { font-size: 13px; }
 
 /* ── Calendar overlay ── */
-.cal-overlay { position: fixed; inset: 0; z-index: 110; display: flex; align-items: flex-end; }
+.cal-overlay { position: fixed; inset: 0; z-index: 110; display: flex; align-items: flex-end; justify-content: center; }
 .cal-overlay[hidden] { display: none; }
 .cal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
 .cal-sheet {
@@ -749,6 +749,7 @@ html, body {
   border-radius: 22px 22px 0 0;
   padding: 0 20px calc(20px + var(--safe-b));
   width: 100%;
+  max-width: 480px;
   z-index: 1;
 }
 .cal-toolbar {
