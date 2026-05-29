@@ -378,24 +378,25 @@ function handleAddToKanban() {
   const summaries = db.getSummaries()
   if (summaries[today]) { summaries[today].text = text; db.saveSummaries(summaries) }
 
-  // Remove today's AI-generated items — latest summary wins.
-  // Items without a source field are legacy summary items (added before source tracking).
-  const kanban = db.getKanban().filter(c =>
+  // Keep only manually-added items (not today's summary items)
+  const existing = db.getKanban().filter(c =>
     !(c.date === today && (c.source === 'summary' || !c.source))
   )
 
-  let added = 0
+  // Dedup only against pre-existing items — items in the current batch
+  // must NOT dedup each other (todo + done version of same task both belong)
+  let added = 0, doneAdded = 0
+  const newItems = []
   for (const item of items) {
-    // Still dedup against manually-added items from other days
-    if (!kanban.some(c => textSimilarity(c.text, item.text) >= 0.65)) {
-      kanban.push({ id: crypto.randomUUID(), text: item.text, type: item.type, done: item.done ?? false, date: today, source: 'summary' })
+    if (!existing.some(c => textSimilarity(c.text, item.text) >= 0.65)) {
+      newItems.push({ id: crypto.randomUUID(), text: item.text, type: item.type, done: item.done ?? false, date: today, source: 'summary' })
       added++
+      if (item.done) doneAdded++
     }
   }
-  db.saveKanban(kanban)
+  db.saveKanban([...existing, ...newItems])
 
   if (added === 0) { toast('没有新事项'); return }
-  const doneAdded = items.filter(i => i.done).length
   const msg = doneAdded
     ? `已加入 ${added} 项（含 ${doneAdded} 项已完成）✓`
     : `已加入 ${added} 项到看板 ✓`
