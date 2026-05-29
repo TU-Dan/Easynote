@@ -22,7 +22,7 @@ async function callDeepSeek(messages, settings, options = {}) {
         model: settings.model || 'deepseek-chat',
         messages,
         temperature: 0.2,
-        max_tokens: 900,
+        max_tokens: 1800,
         stream: true
       })
     })
@@ -139,7 +139,7 @@ ${text}
 请使用下面的 Markdown 结构输出。只输出总结正文，不要解释规则。
 如果某个板块没有内容，就跳过该板块。
 为了让“加入看板”能识别事项，请在 Todo、已完成、重要提醒这几个板块中使用 "- " 输出条目；其他板块可以按最自然的方式表达。
-请控制总长度，优先保留关键事项，不要逐字复述所有记录。
+请覆盖今天的所有记录，每一条都要有所呈现，不要遗漏任何一条。可以合并高度相似的内容，但不能跳过。
 
 ### 📋 Todo 回顾
 - 只列出仍需推进的关键事项，最多 8 条。

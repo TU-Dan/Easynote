@@ -95,7 +95,7 @@ function replaceLocalState(nextState) {
 function applyRemoteState(remoteState) {
   if (!remoteState || !syncReady) return
   applyingRemoteState = true
-  replaceLocalState(remoteState)
+  replaceLocalState(mergeState(getLocalState(), remoteState))
   applyingRemoteState = false
   renderAll()
 }
