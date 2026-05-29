@@ -104,7 +104,7 @@ async function readDeepSeekStream(res, onChunk, controller, onTimeout) {
   return content
 }
 
-export function buildDailySummaryPrompt(entries, date) {
+export function buildDailySummaryPrompt(entries, date, kanban = []) {
   const compactEntries = entries.map(e => ({
     time: new Date(e.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
     content: e.content
@@ -114,8 +114,17 @@ export function buildDailySummaryPrompt(entries, date) {
       .trim()
   }))
   const text = compactEntries.map((e, i) => `${i + 1}. [${e.time}]\n${e.content}`).join('\n\n')
-  return `你是用户的私人助理，帮助把零散记录整理成清晰、可执行的一日总结。
+  const openItems = kanban.filter(c => !c.done)
+  const doneItems = kanban.filter(c => c.done)
+  const kanbanSection = (openItems.length || doneItems.length) ? `
+当前看板状态（已在追踪，无需重复列出）：
+${openItems.length ? `待完成：\n${openItems.map(c => `- ${c.text}`).join('\n')}` : ''}
+${doneItems.length ? `已完成：\n${doneItems.map(c => `- ${c.text}`).join('\n')}` : ''}
+---
+` : ''
 
+  return `你是用户的私人助理，帮助把零散记录整理成清晰、可执行的一日总结。
+${kanbanSection}
 用户今天（${date}）的记录（未分类，请自行判断类型）：
 
 ${text}
@@ -162,8 +171,8 @@ ${text}
 - 不要把所有内容都塞进 Todo；先判断性质再归类。`
 }
 
-export async function generateDailySummary(entries, settings, date) {
-  const prompt = buildDailySummaryPrompt(entries, date)
+export async function generateDailySummary(entries, settings, date, kanban = []) {
+  const prompt = buildDailySummaryPrompt(entries, date, kanban)
   return callDeepSeek(
     [{ role: 'user', content: prompt }],
     settings,
@@ -174,10 +183,11 @@ export async function generateDailySummary(entries, settings, date) {
 // Parse all typed items from AI summary text
 export function extractAllFromSummary(text) {
   const sections = [
-    { emoji: '📋', type: 'todo' },
-    { emoji: '⏰', type: 'reminder' },
-    { emoji: '💬', type: 'quote' },
-    { emoji: '💭', type: 'thought' }
+    { emoji: '📋', type: 'todo',     done: false },
+    { emoji: '✅', type: 'todo',     done: true  },
+    { emoji: '⏰', type: 'reminder', done: false },
+    { emoji: '💬', type: 'quote',    done: false },
+    { emoji: '💭', type: 'thought',  done: false }
   ]
 
   const items = []
@@ -190,7 +200,7 @@ export function extractAllFromSummary(text) {
       .filter(l => l.trim().startsWith('-'))
       .map(l => l.replace(/^-\s*/, '').replace(/\*\*/g, '').trim())
       .filter(Boolean)
-      .forEach(t => items.push({ type, text: t }))
+      .forEach(t => items.push({ type, text: t, done: !!done }))
   }
   return items
 }

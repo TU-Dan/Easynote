@@ -303,7 +303,7 @@ async function handleGenerateSummary() {
           document.getElementById('today-summary-loading-text').textContent = 'AI 已开始生成...'
         }
       }
-    }, today)
+    }, today, db.getKanban())
     setSummaryProgress(100)
     const summaries = db.getSummaries()
     summaries[today] = { text, ts: Date.now() }
@@ -388,7 +388,7 @@ function handleAddToKanban() {
   for (const item of items) {
     // Still dedup against manually-added items from other days
     if (!kanban.some(c => textSimilarity(c.text, item.text) >= 0.65)) {
-      kanban.push({ id: crypto.randomUUID(), text: item.text, type: item.type, done: false, date: today, source: 'summary' })
+      kanban.push({ id: crypto.randomUUID(), text: item.text, type: item.type, done: item.done ?? false, date: today, source: 'summary' })
       added++
     }
   }
@@ -431,12 +431,11 @@ function renderKanban() {
     : statsBase
   const openCount = statsDated.filter(c => !c.done).length
   const doneCount = statsDated.filter(c => c.done).length
-  const statsEl = document.getElementById('kanban-stats')
-  if (statsEl) {
-    statsEl.innerHTML = openCount || doneCount
-      ? `<span class="kstat-open">${openCount} 未完成</span><span class="kstat-sep">·</span><span class="kstat-done">${doneCount} 已完成</span>`
-      : ''
-  }
+  // Put counts on the status filter tabs
+  const openBtn = document.querySelector('#kanban-status-filters [data-status="open"]')
+  const doneBtn = document.querySelector('#kanban-status-filters [data-status="done"]')
+  if (openBtn) openBtn.innerHTML = `未完成${openCount ? ` <span class="tab-count">${openCount}</span>` : ''}`
+  if (doneBtn) doneBtn.innerHTML = `已完成${doneCount ? ` <span class="tab-count">${doneCount}</span>` : ''}`
 
   if (!cards.length) {
     list.innerHTML = ''
