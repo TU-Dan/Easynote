@@ -99,16 +99,6 @@
           </div>
         </div>
 
-        <!-- Entries -->
-        <div class="today-header">
-          <div id="today-date" class="today-date"></div>
-        </div>
-        <div id="today-entries"></div>
-        <div id="today-empty" class="empty-state" hidden>
-          <div class="empty-icon">📭</div>
-          <p>今天还没有记录</p>
-          <p class="empty-sub">去第一个标签记点什么吧</p>
-        </div>
       </section>
 
       <!-- Kanban Tab -->
@@ -139,6 +129,7 @@
           <button class="status-filter-btn active" data-status="open">未完成</button>
           <button class="status-filter-btn" data-status="done">已完成</button>
         </div>
+        <div id="kanban-stats"></div>
         <div id="kanban-list"></div>
         <button id="kanban-clear-done-btn" class="ghost-btn kanban-clear-btn" hidden>清除已完成</button>
         <div id="kanban-empty" class="empty-state" hidden>

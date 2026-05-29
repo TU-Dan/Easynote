@@ -405,39 +405,18 @@ html, body {
 
 .ghost-btn { background: none; border: none; color: var(--text2); font-size: 13px; cursor: pointer; font-family: inherit; padding: 8px 10px; white-space: nowrap; }
 
-.today-header { display: flex; align-items: center; margin-bottom: 4px; }
-.today-date { font-size: 12px; font-weight: 600; color: var(--text2); letter-spacing: .6px; text-transform: uppercase; }
-#today-entries,
-#today-empty {
-  opacity: .68;
-}
 
-/* Timeline */
-.tl-entry {
+/* ── Kanban stats ── */
+#kanban-stats {
   display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 13px 0;
-  border-bottom: 1px solid var(--border);
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  min-height: 14px;
 }
-.tl-entry:last-child { border-bottom: none; }
-.tl-time {
-  font-size: 11px;
-  color: var(--text2);
-  padding-top: 2px;
-  flex-shrink: 0;
-  width: 34px;
-  text-align: right;
-  letter-spacing: .3px;
-}
-.tl-card {
-  flex: 1;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-.tl-text { flex: 1; font-size: 13px; line-height: 1.5; color: var(--text2); word-break: break-all; }
-.tl-del { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 14px; padding: 2px 4px; opacity: .4; flex-shrink: 0; }
+.kstat-open { font-size: 11px; color: var(--text); font-weight: 500; letter-spacing: .2px; }
+.kstat-done { font-size: 11px; color: var(--text2); letter-spacing: .2px; }
+.kstat-sep  { font-size: 10px; color: var(--border); }
 
 /* ── Kanban ── */
 .kanban-toolbar {

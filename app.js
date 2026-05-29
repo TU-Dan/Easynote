@@ -224,9 +224,7 @@ function saveEntry() {
 
 // ── Render: Today tab ─────────────────────────────────────
 function renderToday() {
-  document.getElementById('today-date').textContent = todayLabel()
   renderTodaySummaryArea()
-  renderTodayEntries()
 }
 
 function renderTodaySummaryArea() {
@@ -261,38 +259,6 @@ function renderTodaySummaryArea() {
   }
 }
 
-function renderTodayEntries() {
-  const container = document.getElementById('today-entries')
-  const empty     = document.getElementById('today-empty')
-  const today     = todayKey()
-  const entries   = db.getEntries().filter(e => e.date === today).reverse()
-
-  if (!entries.length) {
-    container.innerHTML = ''
-    empty.hidden = false
-    return
-  }
-  empty.hidden = true
-
-  container.innerHTML = entries.map(e => `
-    <div class="tl-entry">
-      <div class="tl-time">${fmtTime(e.timestamp)}</div>
-      <div class="tl-card">
-        <div class="tl-text">${escHtml(e.content)}</div>
-        <button class="tl-del js-del" data-id="${e.id}">✕</button>
-      </div>
-    </div>
-  `).join('')
-
-  container.querySelectorAll('.js-del').forEach(btn =>
-    btn.addEventListener('click', () => {
-      db.saveEntries(db.getEntries().filter(e => e.id !== btn.dataset.id))
-      renderTodayEntries()
-      renderRecent()
-      renderTodaySummaryArea()
-    })
-  )
-}
 
 // ── Today: generate summary ───────────────────────────────
 async function handleGenerateSummary() {
@@ -457,6 +423,20 @@ function renderKanban() {
   const clearBtn = document.getElementById('kanban-clear-done-btn')
 
   clearBtn.hidden = kanbanStatusFilter !== 'done' || !allCards.some(c => c.done)
+
+  // Stats: count open/done across current type+date filter (ignore status filter)
+  const statsBase = kanbanFilter === 'all' ? allCards : allCards.filter(c => c.type === kanbanFilter)
+  const statsDated = kanbanDateFilter === 'today' ? statsBase.filter(c => c.date === todayKey())
+    : kanbanDateFilter === 'week' ? (() => { const ws = weekStartKey(); return statsBase.filter(c => c.date >= ws) })()
+    : statsBase
+  const openCount = statsDated.filter(c => !c.done).length
+  const doneCount = statsDated.filter(c => c.done).length
+  const statsEl = document.getElementById('kanban-stats')
+  if (statsEl) {
+    statsEl.innerHTML = openCount || doneCount
+      ? `<span class="kstat-open">${openCount} 未完成</span><span class="kstat-sep">·</span><span class="kstat-done">${doneCount} 已完成</span>`
+      : ''
+  }
 
   if (!cards.length) {
     list.innerHTML = ''
