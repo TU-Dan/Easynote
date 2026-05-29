@@ -221,15 +221,29 @@ html, body {
 .entry-del { background: none; border: none; color: var(--text2); cursor: pointer; padding: 2px 4px; font-size: 15px; flex-shrink: 0; opacity: .5; }
 
 /* ── Today Tab ── */
+.today-summary-panel {
+  min-height: min(44vh, 380px);
+  margin-bottom: 28px;
+}
 .summary-top-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 20px;
+  min-height: min(34vh, 280px);
+  gap: 18px;
+  padding: 22px 0 24px;
+  border-bottom: 1px solid var(--text);
+  margin-bottom: 0;
 }
 .summary-count { font-size: 13px; color: var(--text2); }
+.summary-subtle {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 10px;
+  max-width: 230px;
+}
 .summary-gen-btn {
   background: var(--text);
   color: var(--bg);
@@ -243,7 +257,27 @@ html, body {
   white-space: nowrap;
 }
 
-.loading-row { gap: 10px; }
+.summary-loading-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: min(34vh, 280px);
+  padding: 24px 0;
+  border-bottom: 1px solid var(--text);
+}
+.summary-loading-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.summary-loading-copy {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.4;
+}
 .spinner-sm {
   width: 16px; height: 16px;
   border: 1.5px solid var(--border);
@@ -253,6 +287,68 @@ html, body {
   flex-shrink: 0;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.summary-progress-track {
+  width: 100%;
+  height: 4px;
+  background: var(--surface2);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 14px;
+}
+.summary-progress-bar {
+  width: 0;
+  height: 100%;
+  background: var(--text);
+  border-radius: inherit;
+  transition: width .45s ease;
+}
+.summary-progress-text {
+  width: 38px;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.summary-stream-preview {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+  max-height: 38vh;
+  overflow: auto;
+}
+.summary-stream-preview h3 {
+  margin: 18px 0 8px;
+  font-size: 16px;
+  line-height: 1.35;
+}
+.summary-stream-preview h3:first-child {
+  margin-top: 0;
+}
+.summary-stream-preview ul {
+  margin: 8px 0 14px;
+  padding-left: 18px;
+}
+.summary-stream-preview li {
+  margin: 5px 0;
+}
+.summary-stream-preview p {
+  margin: 8px 0;
+}
+.summary-cancel-btn {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--text2);
+  padding: 6px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
 
 .summary-card {
   border: 1px solid var(--border);
@@ -311,6 +407,10 @@ html, body {
 
 .today-header { display: flex; align-items: center; margin-bottom: 4px; }
 .today-date { font-size: 12px; font-weight: 600; color: var(--text2); letter-spacing: .6px; text-transform: uppercase; }
+#today-entries,
+#today-empty {
+  opacity: .68;
+}
 
 /* Timeline */
 .tl-entry {
@@ -336,7 +436,7 @@ html, body {
   align-items: flex-start;
   gap: 8px;
 }
-.tl-text { flex: 1; font-size: 15px; line-height: 1.55; color: var(--text); word-break: break-all; }
+.tl-text { flex: 1; font-size: 13px; line-height: 1.5; color: var(--text2); word-break: break-all; }
 .tl-del { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 14px; padding: 2px 4px; opacity: .4; flex-shrink: 0; }
 
 /* ── Kanban ── */
@@ -576,6 +676,7 @@ html, body {
   flex-shrink: 0;
 }
 .nav-btn {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -593,6 +694,20 @@ html, body {
   transition: color .15s;
 }
 .nav-btn.active { color: var(--text); }
+.nav-progress {
+  position: absolute;
+  top: 7px;
+  right: calc(50% - 32px);
+  min-width: 27px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
 
 /* ── Settings Modal ── */
 .modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-end; }

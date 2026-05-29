@@ -1,7 +1,11 @@
-async function callDeepSeek(messages, settings) {
+async function callDeepSeek(messages, settings, options = {}) {
   const base = (settings.baseUrl || 'https://api.deepseek.com').replace(/\/$/, '')
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 45000)
+  const controller = options.controller || new AbortController()
+  let timedOut = false
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, 120000)
   let res
   try {
     res = await fetch(`${base}/chat/completions`, {
@@ -11,27 +15,94 @@ async function callDeepSeek(messages, settings) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${settings.apiKey}`
       },
-      body: JSON.stringify({ model: 'deepseek-chat', messages, temperature: 0.4, max_tokens: 2200 })
+      body: JSON.stringify({
+        model: settings.model || 'deepseek-v4-flash',
+        messages,
+        thinking: { type: 'disabled' },
+        temperature: 0.2,
+        max_tokens: 900,
+        stream: true
+      })
     })
   } catch (err) {
-    if (err.name === 'AbortError') throw new Error('AI 接口响应超时，请稍后重试')
-    throw new Error(`无法连接 AI 接口，请检查网络或 API Base URL（${err.message}）`)
-  } finally {
     clearTimeout(timeout)
+    if (err.name === 'AbortError') {
+      const abortErr = new Error(timedOut ? 'AI 接口响应超过 2 分钟，请稍后重试' : '已取消生成')
+      abortErr.name = 'AbortError'
+      throw abortErr
+    }
+    throw new Error(`无法连接 AI 接口，请检查网络或 API Base URL（${err.message}）`)
   }
 
   if (!res.ok) {
+    clearTimeout(timeout)
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error?.message || `API 错误 ${res.status}`)
   }
-  const data = await res.json()
-  const content = data.choices?.[0]?.message?.content
+
+  let content
+  try {
+    content = await readDeepSeekStream(res, options.onChunk)
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const abortErr = new Error(timedOut ? 'AI 接口响应超过 2 分钟，请稍后重试' : '已取消生成')
+      abortErr.name = 'AbortError'
+      throw abortErr
+    }
+    throw err
+  } finally {
+    clearTimeout(timeout)
+  }
   if (!content) throw new Error('AI 接口返回为空，请稍后重试')
   return content
 }
 
+async function readDeepSeekStream(res, onChunk) {
+  if (!res.body) {
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content || ''
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (!line.startsWith('data:')) continue
+      const payload = line.slice(5).trim()
+      if (!payload || payload === '[DONE]') continue
+
+      const data = JSON.parse(payload)
+      const delta = data.choices?.[0]?.delta?.content || ''
+      if (!delta) continue
+      content += delta
+      onChunk?.(delta, content)
+    }
+  }
+
+  return content
+}
+
 export function buildDailySummaryPrompt(entries, date) {
-  const text = entries.map((e, i) => `${i + 1}. ${e.content}`).join('\n')
+  const compactEntries = entries.map(e => ({
+    time: new Date(e.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    content: e.content
+      .replace(/\s+/g, ' ')
+      .replace(/☐/g, '\n☐')
+      .replace(/☑/g, '\n☑')
+      .trim()
+  }))
+  const text = compactEntries.map((e, i) => `${i + 1}. [${e.time}]\n${e.content}`).join('\n\n')
   return `你是用户的私人助理，帮助把零散记录整理成清晰、可执行的一日总结。
 
 用户今天（${date}）的记录（未分类，请自行判断类型）：
@@ -48,24 +119,25 @@ ${text}
 请使用下面的 Markdown 结构输出。只输出总结正文，不要解释规则。
 如果某个板块没有内容，就跳过该板块。
 为了让“加入看板”能识别事项，请在 Todo、已完成、重要提醒这几个板块中使用 "- " 输出条目；其他板块可以按最自然的方式表达。
+请控制总长度，优先保留关键事项，不要逐字复述所有记录。
 
 ### 📋 Todo 回顾
-- 只列出仍需推进的事项。
+- 只列出仍需推进的关键事项，最多 8 条。
 - 如果来自 "☐" 项，保留原意并适度压缩。
 - 如果来自 "☑" 项，不要放在这里。
 
 ### ✅ 已完成
-- 只列出 "☑" 或语义上已经完成的事项。
+- 只列出 "☑" 或语义上已经完成的关键事项，最多 6 条。
 - 用简洁语言说明完成了什么。
 
 ### 💭 感触洞见
-- 提炼用户今天的判断、反思、方向感、问题意识。
+- 提炼用户今天的判断、反思、方向感、问题意识，最多 3 条。
 
 ### 💬 精选好句
 - 只放适合原文保留的句子。
 
 ### ⏰ 重要提醒
-- 放时间敏感、需要后续注意或不能遗漏的内容。
+- 放时间敏感、需要后续注意或不能遗漏的内容，最多 4 条。
 
 ### ✨ 今日寄语
 - 一句话，温和、有力量，不要鸡汤。
@@ -79,7 +151,11 @@ ${text}
 
 export async function generateDailySummary(entries, settings, date) {
   const prompt = buildDailySummaryPrompt(entries, date)
-  return callDeepSeek([{ role: 'user', content: prompt }], settings)
+  return callDeepSeek(
+    [{ role: 'user', content: prompt }],
+    settings,
+    { controller: settings.controller, onChunk: settings.onChunk }
+  )
 }
 
 // Parse all typed items from AI summary text
