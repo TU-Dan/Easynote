@@ -169,7 +169,13 @@ function toast(msg, ms = 2200) {
 // ── State ─────────────────────────────────────────────────
 let activeTab = 'capture'
 let kanbanFilter = 'todo'
-let kanbanDateFilter = 'all'
+let kanbanDateFilter = 'today'
+let kanbanDateFrom = null
+let kanbanDateTo   = null
+let calYear  = new Date().getFullYear()
+let calMonth = new Date().getMonth()
+let calStart = null
+let calEnd   = null
 let kanbanStatusFilter = 'open'
 let authMode = 'login'
 let pendingConfirmationEmail = ''
@@ -406,6 +412,14 @@ function handleAddToKanban() {
 const TYPE_ICONS = { todo: null, reminder: '⏰', quote: '💬', thought: '💭' }
 const FILTER_LABELS = { todo: 'Todo', reminder: '提醒', quote: '好句', thought: '感触', all: '全部' }
 
+function daysAgoKey(n) {
+  const d = new Date(); d.setDate(d.getDate() - n)
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+}
+function isArchived(card) {
+  return card.done && card.date < daysAgoKey(7)
+}
+
 function weekStartKey() {
   const d = new Date()
   const day = d.getDay()
@@ -417,8 +431,19 @@ function weekStartKey() {
 function renderKanban() {
   const allCards = db.getKanban()
   let cards = kanbanFilter === 'all' ? allCards : allCards.filter(c => c.type === kanbanFilter)
-  if (kanbanDateFilter === 'today') cards = cards.filter(c => c.date === todayKey())
-  else if (kanbanDateFilter === 'week') { const ws = weekStartKey(); cards = cards.filter(c => c.date >= ws) }
+  if (kanbanDateFilter === 'today') {
+    cards = cards.filter(c => c.date === todayKey() && !isArchived(c))
+  } else if (kanbanDateFilter === 'week') {
+    const ws = weekStartKey()
+    cards = cards.filter(c => c.date >= ws && !isArchived(c))
+  } else if (kanbanDateFilter === 'other') {
+    if (kanbanDateFrom) {
+      const to = kanbanDateTo || kanbanDateFrom
+      cards = cards.filter(c => c.date >= kanbanDateFrom && c.date <= to)
+    } else {
+      cards = []
+    }
+  }
   cards = kanbanStatusFilter === 'done' ? cards.filter(c => c.done) : cards.filter(c => !c.done)
   const list     = document.getElementById('kanban-list')
   const empty    = document.getElementById('kanban-empty')
@@ -428,9 +453,13 @@ function renderKanban() {
 
   // Stats: count open/done across current type+date filter (ignore status filter)
   const statsBase = kanbanFilter === 'all' ? allCards : allCards.filter(c => c.type === kanbanFilter)
-  const statsDated = kanbanDateFilter === 'today' ? statsBase.filter(c => c.date === todayKey())
-    : kanbanDateFilter === 'week' ? (() => { const ws = weekStartKey(); return statsBase.filter(c => c.date >= ws) })()
-    : statsBase
+  const statsDated = kanbanDateFilter === 'today'
+    ? statsBase.filter(c => c.date === todayKey() && !isArchived(c))
+    : kanbanDateFilter === 'week'
+    ? (() => { const ws = weekStartKey(); return statsBase.filter(c => c.date >= ws && !isArchived(c)) })()
+    : kanbanDateFilter === 'other' && kanbanDateFrom
+    ? (() => { const to = kanbanDateTo || kanbanDateFrom; return statsBase.filter(c => c.date >= kanbanDateFrom && c.date <= to) })()
+    : statsBase.filter(c => !isArchived(c))
   const openCount = statsDated.filter(c => !c.done).length
   const doneCount = statsDated.filter(c => c.done).length
   // Put counts on the status filter tabs
@@ -643,6 +672,84 @@ function endDrag() {
 
   drag = null
   gesture = null
+}
+
+// ── Calendar ──────────────────────────────────────────────
+function updateOtherBtnLabel() {
+  const btn = document.querySelector('#kanban-date-filters [data-date="other"]')
+  if (!btn) return
+  if (kanbanDateFrom && kanbanDateTo && kanbanDateFrom !== kanbanDateTo) {
+    const fmt = s => s.slice(5).replace('-', '/')
+    btn.textContent = `${fmt(kanbanDateFrom)}–${fmt(kanbanDateTo)}`
+  } else if (kanbanDateFrom) {
+    btn.textContent = kanbanDateFrom.slice(5).replace('-', '/')
+  } else {
+    btn.textContent = '其他'
+  }
+}
+
+function openCalendar() {
+  calYear  = new Date().getFullYear()
+  calMonth = new Date().getMonth()
+  renderCalendar()
+  document.getElementById('cal-overlay').hidden = false
+}
+
+function closeCalendar() {
+  document.getElementById('cal-overlay').hidden = true
+}
+
+function renderCalendar() {
+  const title = document.getElementById('cal-title')
+  const grid  = document.getElementById('cal-grid')
+  const today = todayKey()
+
+  title.textContent = `${calYear}年${calMonth + 1}月`
+
+  const firstDow    = new Date(calYear, calMonth, 1).getDay()
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate()
+
+  // Normalise start/end for range rendering
+  const rangeS = calStart && calEnd ? (calStart <= calEnd ? calStart : calEnd) : calStart
+  const rangeE = calStart && calEnd ? (calStart <= calEnd ? calEnd : calStart) : calStart
+
+  let html = ''
+  for (let i = 0; i < firstDow; i++) html += '<button class="cal-day empty"></button>'
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${calYear}-${pad(calMonth + 1)}-${pad(d)}`
+    let cls = 'cal-day'
+    if (ds === today) cls += ' today'
+    if (rangeS && rangeE && rangeS !== rangeE) {
+      if (ds === rangeS)                  cls += ' range-start in-range'
+      else if (ds === rangeE)             cls += ' range-end in-range'
+      else if (ds > rangeS && ds < rangeE) cls += ' in-range'
+    } else if (rangeS && ds === rangeS)  cls += ' selected'
+    html += `<button class="${cls}" data-date="${ds}">${d}</button>`
+  }
+
+  grid.innerHTML = html
+  grid.querySelectorAll('.cal-day:not(.empty)').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const d = btn.dataset.date
+      if (!calStart || (calStart && calEnd)) {
+        calStart = d; calEnd = null
+      } else if (d === calStart) {
+        calStart = null; calEnd = null
+      } else {
+        calEnd = d
+      }
+      // Apply to kanban
+      if (calStart) {
+        kanbanDateFrom = calStart <= (calEnd || calStart) ? calStart : calEnd
+        kanbanDateTo   = calStart <= (calEnd || calStart) ? (calEnd || calStart) : calStart
+      } else {
+        kanbanDateFrom = null; kanbanDateTo = null
+      }
+      renderCalendar()
+      renderKanban()
+    })
+  )
 }
 
 // ── Summary edit toggle ───────────────────────────────────
@@ -908,8 +1015,21 @@ function init() {
     if (!btn) return
     kanbanDateFilter = btn.dataset.date
     document.querySelectorAll('#kanban-date-filters .date-segment-btn').forEach(b => b.classList.toggle('active', b === btn))
+    if (kanbanDateFilter === 'other') { openCalendar(); return }
+    updateOtherBtnLabel()
     renderKanban()
   })
+
+  document.getElementById('cal-prev').addEventListener('click', () => {
+    calMonth--; if (calMonth < 0) { calMonth = 11; calYear-- }
+    renderCalendar()
+  })
+  document.getElementById('cal-next').addEventListener('click', () => {
+    calMonth++; if (calMonth > 11) { calMonth = 0; calYear++ }
+    renderCalendar()
+  })
+  document.getElementById('cal-close').addEventListener('click', () => { closeCalendar(); updateOtherBtnLabel(); renderKanban() })
+  document.getElementById('cal-backdrop').addEventListener('click', () => { closeCalendar(); updateOtherBtnLabel(); renderKanban() })
 
   // Kanban status filter
   document.getElementById('kanban-status-filters').addEventListener('click', e => {

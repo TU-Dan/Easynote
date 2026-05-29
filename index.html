@@ -120,9 +120,9 @@
             </div>
           </div>
           <div class="date-segment" id="kanban-date-filters">
-            <button class="date-segment-btn active" data-date="all">全部</button>
-            <button class="date-segment-btn" data-date="today">今天</button>
+            <button class="date-segment-btn active" data-date="today">今天</button>
             <button class="date-segment-btn" data-date="week">本周</button>
+            <button class="date-segment-btn" data-date="other" id="cal-trigger">其他</button>
           </div>
         </div>
         <div class="status-filter" id="kanban-status-filters">
@@ -195,6 +195,24 @@
     </div>
 
     <div id="toast" class="toast" hidden></div>
+
+    <!-- Calendar overlay -->
+    <div id="cal-overlay" class="cal-overlay" hidden>
+      <div class="cal-backdrop" id="cal-backdrop"></div>
+      <div class="cal-sheet">
+        <div class="modal-handle"></div>
+        <div class="cal-toolbar">
+          <button id="cal-prev" class="cal-nav">‹</button>
+          <span id="cal-title" class="cal-title"></span>
+          <button id="cal-next" class="cal-nav">›</button>
+        </div>
+        <div class="cal-weekdays">
+          <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+        </div>
+        <div id="cal-grid" class="cal-grid"></div>
+        <button id="cal-close" class="ghost-btn" style="width:100%;text-align:center;padding:14px 0;margin-top:4px">关闭</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="app.js"></script>

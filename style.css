@@ -738,3 +738,84 @@ html, body {
 .empty-icon { font-size: 32px; margin-bottom: 16px; }
 .empty-state p { font-size: 15px; margin-bottom: 6px; }
 .empty-sub { font-size: 13px; }
+
+/* ── Calendar overlay ── */
+.cal-overlay { position: fixed; inset: 0; z-index: 110; display: flex; align-items: flex-end; }
+.cal-overlay[hidden] { display: none; }
+.cal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
+.cal-sheet {
+  position: relative;
+  background: var(--surface);
+  border-radius: 22px 22px 0 0;
+  padding: 0 20px calc(20px + var(--safe-b));
+  width: 100%;
+  z-index: 1;
+}
+.cal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0 14px;
+}
+.cal-title { font-size: 16px; font-weight: 600; }
+.cal-nav {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 24px;
+  padding: 4px 10px;
+  line-height: 1;
+  font-family: inherit;
+}
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 4px;
+}
+.cal-weekdays span {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text2);
+  padding: 4px 0;
+  font-weight: 500;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.cal-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  position: relative;
+}
+.cal-day.empty { pointer-events: none; }
+.cal-day.today { font-weight: 700; }
+.cal-day.today::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text);
+}
+.cal-day.selected {
+  background: var(--text);
+  color: var(--bg);
+  border-radius: 50%;
+}
+.cal-day.in-range { background: var(--surface2); border-radius: 0; }
+.cal-day.range-start { background: var(--text); color: var(--bg); border-radius: 50% 0 0 50%; }
+.cal-day.range-end   { background: var(--text); color: var(--bg); border-radius: 0 50% 50% 0; }
+.cal-day.range-start.range-end { border-radius: 50%; }
