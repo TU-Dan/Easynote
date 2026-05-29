@@ -170,6 +170,7 @@ function toast(msg, ms = 2200) {
 let activeTab = 'capture'
 let kanbanFilter = 'todo'
 let kanbanDateFilter = 'all'
+let kanbanStatusFilter = 'open'
 let authMode = 'login'
 let pendingConfirmationEmail = ''
 
@@ -297,9 +298,12 @@ async function handleGenerateSummary() {
     document.getElementById('today-summary-text').value = text
     showSummaryPreview()
   } catch (err) {
-    document.getElementById('today-summary-loading').hidden = true
-    document.getElementById('today-summary-idle').hidden    = false
     toast(`生成失败: ${err.message}`, 4000)
+  } finally {
+    document.getElementById('today-summary-loading').hidden = true
+    const hasSummary = !!db.getSummaries()[today]
+    document.getElementById('today-summary-idle').hidden = hasSummary
+    document.getElementById('today-summary-result').hidden = !hasSummary
   }
 }
 
@@ -332,6 +336,7 @@ function handleAddToKanban() {
 
 // ── Kanban ────────────────────────────────────────────────
 const TYPE_ICONS = { todo: null, reminder: '⏰', quote: '💬', thought: '💭' }
+const FILTER_LABELS = { todo: 'Todo', reminder: '提醒', quote: '好句', thought: '感触', all: '全部' }
 
 function weekStartKey() {
   const d = new Date()
@@ -346,11 +351,12 @@ function renderKanban() {
   let cards = kanbanFilter === 'all' ? allCards : allCards.filter(c => c.type === kanbanFilter)
   if (kanbanDateFilter === 'today') cards = cards.filter(c => c.date === todayKey())
   else if (kanbanDateFilter === 'week') { const ws = weekStartKey(); cards = cards.filter(c => c.date >= ws) }
+  cards = kanbanStatusFilter === 'done' ? cards.filter(c => c.done) : cards.filter(c => !c.done)
   const list     = document.getElementById('kanban-list')
   const empty    = document.getElementById('kanban-empty')
   const clearBtn = document.getElementById('kanban-clear-done-btn')
 
-  clearBtn.hidden = !allCards.some(c => c.done)
+  clearBtn.hidden = kanbanStatusFilter !== 'done' || !allCards.some(c => c.done)
 
   if (!cards.length) {
     list.innerHTML = ''
@@ -791,20 +797,44 @@ function init() {
   })
 
   // Kanban type filter
+  document.getElementById('kanban-filter-trigger').addEventListener('click', () => {
+    const menu = document.getElementById('kanban-filters')
+    const nextHidden = !menu.hidden
+    menu.hidden = nextHidden
+    document.getElementById('kanban-filter-trigger').setAttribute('aria-expanded', String(!nextHidden))
+  })
   document.getElementById('kanban-filters').addEventListener('click', e => {
-    const btn = e.target.closest('.k-filter-btn')
+    const btn = e.target.closest('.tag-filter-option')
     if (!btn) return
     kanbanFilter = btn.dataset.filter
-    document.querySelectorAll('#kanban-filters .k-filter-btn').forEach(b => b.classList.toggle('active', b === btn))
+    document.getElementById('kanban-filter-label').textContent = FILTER_LABELS[kanbanFilter] || kanbanFilter
+    document.querySelectorAll('#kanban-filters .tag-filter-option').forEach(b => b.classList.toggle('active', b === btn))
+    document.getElementById('kanban-filters').hidden = true
+    document.getElementById('kanban-filter-trigger').setAttribute('aria-expanded', 'false')
     renderKanban()
+  })
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.tag-filter')) {
+      document.getElementById('kanban-filters').hidden = true
+      document.getElementById('kanban-filter-trigger').setAttribute('aria-expanded', 'false')
+    }
   })
 
   // Kanban date filter
   document.getElementById('kanban-date-filters').addEventListener('click', e => {
-    const btn = e.target.closest('.k-filter-btn')
+    const btn = e.target.closest('.date-segment-btn')
     if (!btn) return
     kanbanDateFilter = btn.dataset.date
-    document.querySelectorAll('#kanban-date-filters .k-filter-btn').forEach(b => b.classList.toggle('active', b === btn))
+    document.querySelectorAll('#kanban-date-filters .date-segment-btn').forEach(b => b.classList.toggle('active', b === btn))
+    renderKanban()
+  })
+
+  // Kanban status filter
+  document.getElementById('kanban-status-filters').addEventListener('click', e => {
+    const btn = e.target.closest('.status-filter-btn')
+    if (!btn) return
+    kanbanStatusFilter = btn.dataset.status
+    document.querySelectorAll('#kanban-status-filters .status-filter-btn').forEach(b => b.classList.toggle('active', b === btn))
     renderKanban()
   })
 
@@ -826,6 +856,7 @@ function init() {
     e.target.style.height = e.target.scrollHeight + 'px'
   })
 
+  document.getElementById('capture-today-label').textContent = todayLabel()
   setAuthMode('login')
   initAuth()
 }

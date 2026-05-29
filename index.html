@@ -50,6 +50,10 @@
       <!-- Capture Tab -->
       <section id="tab-capture" class="tab-content active">
         <div class="capture-card">
+          <div class="capture-head">
+            <span class="capture-kicker">快速记录</span>
+            <span id="capture-today-label" class="capture-date"></span>
+          </div>
           <textarea id="capture-input" placeholder="记录任何事..." autofocus></textarea>
           <button id="save-btn">保存</button>
         </div>
@@ -94,17 +98,31 @@
 
       <!-- Kanban Tab -->
       <section id="tab-kanban" class="tab-content">
-        <div class="kanban-filters" id="kanban-filters">
-          <button class="k-filter-btn active" data-filter="todo">Todo</button>
-          <button class="k-filter-btn" data-filter="reminder">提醒</button>
-          <button class="k-filter-btn" data-filter="quote">好句</button>
-          <button class="k-filter-btn" data-filter="thought">感触</button>
-          <button class="k-filter-btn" data-filter="all">全部</button>
+        <div class="kanban-toolbar">
+          <div class="tag-filter">
+            <button id="kanban-filter-trigger" class="tag-filter-trigger" type="button" aria-expanded="false">
+              <span id="kanban-filter-label">Todo</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </button>
+            <div id="kanban-filters" class="tag-filter-menu" hidden>
+              <button class="tag-filter-option active" data-filter="todo">Todo</button>
+              <button class="tag-filter-option" data-filter="reminder">提醒</button>
+              <button class="tag-filter-option" data-filter="quote">好句</button>
+              <button class="tag-filter-option" data-filter="thought">感触</button>
+              <button class="tag-filter-option" data-filter="all">全部</button>
+            </div>
+          </div>
+          <div class="date-segment" id="kanban-date-filters">
+            <button class="date-segment-btn active" data-date="all">全部</button>
+            <button class="date-segment-btn" data-date="today">今天</button>
+            <button class="date-segment-btn" data-date="week">本周</button>
+          </div>
         </div>
-        <div class="kanban-filters" id="kanban-date-filters">
-          <button class="k-filter-btn active" data-date="all">全部时间</button>
-          <button class="k-filter-btn" data-date="today">今天</button>
-          <button class="k-filter-btn" data-date="week">本周</button>
+        <div class="status-filter" id="kanban-status-filters">
+          <button class="status-filter-btn active" data-status="open">未完成</button>
+          <button class="status-filter-btn" data-status="done">已完成</button>
         </div>
         <div id="kanban-list"></div>
         <button id="kanban-clear-done-btn" class="ghost-btn kanban-clear-btn" hidden>清除已完成</button>

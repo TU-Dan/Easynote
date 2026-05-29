@@ -138,20 +138,43 @@ html, body {
 
 /* ── Capture ── */
 .capture-card {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 16px;
-  margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  min-height: min(46vh, 360px);
+  border: 1px solid var(--text);
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 30px;
   background: var(--surface);
+}
+.capture-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.capture-kicker {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.capture-date {
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  white-space: nowrap;
 }
 #capture-input {
   width: 100%;
-  min-height: 120px;
+  flex: 1;
+  min-height: 210px;
   border: none;
   background: none;
   color: var(--text);
-  font-size: 16px;
-  line-height: 1.7;
+  font-size: 18px;
+  line-height: 1.65;
   resize: none;
   outline: none;
   font-family: inherit;
@@ -160,7 +183,7 @@ html, body {
 
 #save-btn {
   width: 100%;
-  padding: 13px;
+  padding: 14px;
   background: var(--text);
   color: var(--bg);
   border: none;
@@ -172,6 +195,9 @@ html, body {
   margin-top: 14px;
 }
 #save-btn:active { opacity: .7; }
+.recent-section {
+  opacity: .82;
+}
 
 .section-label {
   font-size: 11px;
@@ -179,18 +205,18 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--text2);
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 .entry-card {
-  padding: 12px 0;
+  padding: 9px 0;
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 10px;
   align-items: flex-start;
 }
 .entry-body { flex: 1; min-width: 0; }
-.entry-text { font-size: 15px; line-height: 1.55; color: var(--text); word-break: break-all; }
+.entry-text { font-size: 13px; line-height: 1.5; color: var(--text2); word-break: break-all; }
 .entry-meta { font-size: 11px; color: var(--text2); margin-top: 3px; letter-spacing: .3px; }
 .entry-del { background: none; border: none; color: var(--text2); cursor: pointer; padding: 2px 4px; font-size: 15px; flex-shrink: 0; opacity: .5; }
 
@@ -314,35 +340,115 @@ html, body {
 .tl-del { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 14px; padding: 2px 4px; opacity: .4; flex-shrink: 0; }
 
 /* ── Kanban ── */
-.kanban-filters {
+.kanban-toolbar {
   display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  padding-bottom: 2px;
-  scrollbar-width: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  position: relative;
+  z-index: 3;
 }
-.kanban-filters::-webkit-scrollbar { display: none; }
-.k-filter-btn {
-  flex-shrink: 0;
-  padding: 5px 12px;
-  border-radius: 20px;
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text2);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: inherit;
-}
-.k-filter-btn.active {
+.tag-filter { position: relative; min-width: 0; }
+.tag-filter-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 116px;
+  max-width: 170px;
+  padding: 9px 12px;
+  border: 1px solid var(--text);
+  border-radius: 6px;
   background: var(--text);
-  border-color: var(--text);
   color: var(--bg);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
 }
-
-#kanban-date-filters { margin-bottom: 16px; }
+.tag-filter-trigger span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.tag-filter-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  width: 176px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 6px;
+  box-shadow: 0 16px 42px rgba(0,0,0,.18);
+}
+.tag-filter-option {
+  width: 100%;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text2);
+  padding: 10px 9px;
+  text-align: left;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tag-filter-option.active {
+  background: var(--surface2);
+  color: var(--text);
+  font-weight: 700;
+}
+.date-segment {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+}
+.date-segment-btn {
+  min-width: 42px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text2);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.date-segment-btn.active {
+  background: var(--surface);
+  color: var(--text);
+}
+.status-filter {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: -4px 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.status-filter-btn {
+  border: none;
+  background: transparent;
+  color: var(--text2);
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.status-filter-btn.active {
+  color: var(--text);
+  box-shadow: inset 0 -1px 0 var(--text);
+}
 
 .k-card {
   position: relative;

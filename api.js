@@ -1,47 +1,84 @@
 async function callDeepSeek(messages, settings) {
   const base = (settings.baseUrl || 'https://api.deepseek.com').replace(/\/$/, '')
-  const res = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${settings.apiKey}`
-    },
-    body: JSON.stringify({ model: 'deepseek-chat', messages, temperature: 0.7, max_tokens: 2000 })
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 45000)
+  let res
+  try {
+    res = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${settings.apiKey}`
+      },
+      body: JSON.stringify({ model: 'deepseek-chat', messages, temperature: 0.4, max_tokens: 2200 })
+    })
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('AI 接口响应超时，请稍后重试')
+    throw new Error(`无法连接 AI 接口，请检查网络或 API Base URL（${err.message}）`)
+  } finally {
+    clearTimeout(timeout)
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error?.message || `API 错误 ${res.status}`)
   }
-  return (await res.json()).choices[0].message.content
+  const data = await res.json()
+  const content = data.choices?.[0]?.message?.content
+  if (!content) throw new Error('AI 接口返回为空，请稍后重试')
+  return content
 }
 
-export async function generateDailySummary(entries, settings, date) {
+export function buildDailySummaryPrompt(entries, date) {
   const text = entries.map((e, i) => `${i + 1}. ${e.content}`).join('\n')
-  const prompt = `你是用户的私人助理，帮助梳理每日记录。
+  return `你是用户的私人助理，帮助把零散记录整理成清晰、可执行的一日总结。
 
 用户今天（${date}）的记录（未分类，请自行判断类型）：
 
 ${text}
 
-请自动归类，生成今日总结。使用以下格式（某类没有内容就跳过该板块）：
+请先理解记录中的符号：
+- "☐" 表示尚未完成、待推进、可进入 Todo。
+- "☑" 表示已经完成，用于回顾，不要再当成待办。
+- 没有符号的内容，请根据语义判断是任务、提醒、想法、引用还是项目线索。
+
+用户可以用任何格式记录内容，请尊重原始表达，不要要求用户改变记录格式。
+
+请使用下面的 Markdown 结构输出。只输出总结正文，不要解释规则。
+如果某个板块没有内容，就跳过该板块。
+为了让“加入看板”能识别事项，请在 Todo、已完成、重要提醒这几个板块中使用 "- " 输出条目；其他板块可以按最自然的方式表达。
 
 ### 📋 Todo 回顾
-识别出待办或任务类记录，逐条列出。
+- 只列出仍需推进的事项。
+- 如果来自 "☐" 项，保留原意并适度压缩。
+- 如果来自 "☑" 项，不要放在这里。
+
+### ✅ 已完成
+- 只列出 "☑" 或语义上已经完成的事项。
+- 用简洁语言说明完成了什么。
 
 ### 💭 感触洞见
-识别出感悟、想法类记录，提炼核心主题。
+- 提炼用户今天的判断、反思、方向感、问题意识。
 
 ### 💬 精选好句
-识别出摘抄、引用类记录，原文呈现。
+- 只放适合原文保留的句子。
 
 ### ⏰ 重要提醒
-识别出提醒、注意事项类记录，高亮展示。
+- 放时间敏感、需要后续注意或不能遗漏的内容。
 
 ### ✨ 今日寄语
-一句有力量的总结。
+- 一句话，温和、有力量，不要鸡汤。
 
-用中文，语气温和而有深度，避免废话。`
+整体要求：
+- 用中文。
+- 保持克制、清晰、具体。
+- 不要编造记录里没有的信息。
+- 不要把所有内容都塞进 Todo；先判断性质再归类。`
+}
 
+export async function generateDailySummary(entries, settings, date) {
+  const prompt = buildDailySummaryPrompt(entries, date)
   return callDeepSeek([{ role: 'user', content: prompt }], settings)
 }
 
@@ -68,4 +105,3 @@ export function extractAllFromSummary(text) {
   }
   return items
 }
-
