@@ -1,4 +1,4 @@
-import { generateDailySummary, extractAllFromSummary } from './api.js'
+import { generateDailySummary, generateDailyLetter, extractAllFromSummary } from './api.js'
 import { configureSync, resendSignupEmail, signInWithPassword, signUpWithPassword, signOutOfSync, getCurrentUser, pullSyncState, pushSyncState } from './supabase-sync.js'
 import { SUPABASE_CONFIG } from './supabase-config.js'
 
@@ -383,7 +383,7 @@ let archiveOpenDate = null
 function datesWithSummaries() {
   const summaries = db.getSummaries()
   return Object.keys(summaries)
-    .filter(d => (summaries[d]?.text || '').trim())
+    .filter(d => (summaries[d]?.letter || '').trim())
     .sort((a, b) => b.localeCompare(a))
 }
 
@@ -411,7 +411,7 @@ function renderArchive() {
     return `
       <button class="letter-item js-letter" data-date="${d}">
         <div class="letter-item-date">${d}${badge}</div>
-        <div class="letter-item-preview">${escHtml(summaryPlainPreview(s?.text))}</div>
+        <div class="letter-item-preview">${escHtml(summaryPlainPreview(s?.letter))}</div>
       </button>`
   }).join('')
 }
@@ -423,7 +423,7 @@ function openLetter(date) {
   document.getElementById('archive-list-view').hidden = true
   document.getElementById('archive-detail').hidden = false
   document.getElementById('archive-letter-date').textContent = date
-  document.getElementById('archive-letter-body').innerHTML = md2html(s.text || '')
+  document.getElementById('archive-letter-body').innerHTML = md2html(s.letter || '')
   document.getElementById('archive-reflection').value = s.reflection || ''
 }
 
@@ -442,8 +442,8 @@ function saveReflection() {
   toast('补充已保存 ✓')
 }
 
-// Auto-generate summaries for past days that have records but no summary
-async function backfillSummaries() {
+// Auto-write a letter for past days that have records but no letter yet
+async function backfillLetters() {
   const settings = db.getSettings()
   if (!settings.apiKey) return
   const today = todayKey()
@@ -455,14 +455,14 @@ async function backfillSummaries() {
   }
   const summaries = db.getSummaries()
   const targets = Object.keys(byDate)
-    .filter(d => !(summaries[d]?.text || '').trim())
+    .filter(d => !(summaries[d]?.letter || '').trim())
     .sort()
   for (const date of targets) {
     try {
-      const text = await generateDailySummary(byDate[date], { ...settings }, date, [])
-      if (!text || !text.trim()) continue
+      const letter = await generateDailyLetter(byDate[date], { ...settings }, date)
+      if (!letter || !letter.trim()) continue
       const cur = db.getSummaries()
-      cur[date] = { ...(cur[date] || {}), text, ts: Date.now() }
+      cur[date] = { ...(cur[date] || {}), letter, ts: Date.now() }
       db.saveSummaries(cur)
       queueSync(500)
       if (activeTab === 'archive' && !archiveOpenDate) renderArchive()
@@ -1072,7 +1072,7 @@ async function enterApp() {
   setSyncStatus(`已登录：${getCurrentUser()?.email || ''}`)
   renderAll()
   queueSync(100)
-  backfillSummaries()
+  backfillLetters()
   setTimeout(() => document.getElementById('capture-input').focus(), 150)
 }
 
