@@ -54,6 +54,7 @@ function toSummaryMap(rows) {
       text: row.text,
       letter: row.letter || '',
       reflection: row.reflection || '',
+      favorite: !!row.favorite,
       ts: row.updated_ms || new Date(row.updated_at).getTime()
     }
   ]))
@@ -89,6 +90,7 @@ function fromSummary(date, summary) {
     text: summary.text || '',
     letter: summary.letter || '',
     reflection: summary.reflection || '',
+    favorite: !!summary.favorite,
     updated_ms: summary.ts || Date.now(),
     client_id: INSTANCE_ID,
     updated_at: new Date().toISOString()
@@ -201,7 +203,7 @@ export async function pullSyncState() {
 
   const [entriesRes, summariesRes, kanbanRes, settingsRes] = await Promise.all([
     supabase.from(TABLES.entries).select('id, content, timestamp_ms, entry_date').order('timestamp_ms'),
-    supabase.from(TABLES.summaries).select('summary_date, text, updated_ms, updated_at, reflection, letter'),
+    supabase.from(TABLES.summaries).select('summary_date, text, updated_ms, updated_at, reflection, letter, favorite'),
     supabase.from(TABLES.kanban).select('id, text, card_type, done, card_date, sort_order').order('sort_order'),
     supabase.from(TABLES.settings).select('api_key, base_url').maybeSingle()
   ])

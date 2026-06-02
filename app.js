@@ -381,6 +381,7 @@ async function handleGenerateSummary() {
 let archiveOpenDate = null
 let archiveSearch = ''
 let archiveRange = 'all'
+let archiveFavOnly = false
 
 function datesWithSummaries() {
   const summaries = db.getSummaries()
@@ -410,6 +411,7 @@ function renderArchive() {
   const floor = archiveRange === 'all' ? '' : daysAgoKey(Number(archiveRange) - 1)
   const q = archiveSearch.trim().toLowerCase()
   const dates = allDates.filter(d => {
+    if (archiveFavOnly && !summaries[d]?.favorite) return false
     if (floor && d < floor) return false
     if (q) {
       const hay = `${d} ${summaries[d]?.letter || ''} ${summaries[d]?.reflection || ''}`.toLowerCase()
@@ -424,9 +426,10 @@ function renderArchive() {
   list.innerHTML = dates.map(d => {
     const s = summaries[d]
     const badge = (s?.reflection || '').trim() ? ' <span class="letter-badge">补充</span>' : ''
+    const star = s?.favorite ? '<span class="letter-star">★</span> ' : ''
     return `
       <button class="letter-item js-letter" data-date="${d}">
-        <div class="letter-item-date">${d}${badge}</div>
+        <div class="letter-item-date">${star}${d}${badge}</div>
         <div class="letter-item-preview">${escHtml(summaryPlainPreview(s?.letter))}</div>
       </button>`
   }).join('')
@@ -441,6 +444,26 @@ function openLetter(date) {
   document.getElementById('archive-letter-date').textContent = date
   document.getElementById('archive-letter-body').innerHTML = md2html(s.letter || '')
   document.getElementById('archive-reflection').value = s.reflection || ''
+  setFavButton(!!s.favorite)
+}
+
+function setFavButton(fav) {
+  const btn = document.getElementById('archive-fav-btn')
+  btn.classList.toggle('active', fav)
+  btn.setAttribute('aria-pressed', fav ? 'true' : 'false')
+  btn.textContent = fav ? '★ 已收藏' : '☆ 收藏'
+}
+
+function toggleFavorite() {
+  if (!archiveOpenDate) return
+  const summaries = db.getSummaries()
+  const cur = summaries[archiveOpenDate] || {}
+  const fav = !cur.favorite
+  summaries[archiveOpenDate] = { ...cur, favorite: fav, ts: Date.now() }
+  db.saveSummaries(summaries)
+  queueSync(300)
+  setFavButton(fav)
+  toast(fav ? '已收藏 ✓' : '已取消收藏')
 }
 
 function closeLetter() {
@@ -1241,6 +1264,15 @@ function init() {
     archiveRange = btn.dataset.range
     document.querySelectorAll('#archive-date-filters .date-segment-btn')
       .forEach(b => b.classList.toggle('active', b === btn))
+    renderArchive()
+  })
+  document.getElementById('archive-fav-btn').addEventListener('click', toggleFavorite)
+  document.getElementById('archive-fav-filter').addEventListener('click', e => {
+    archiveFavOnly = !archiveFavOnly
+    const btn = e.currentTarget
+    btn.classList.toggle('active', archiveFavOnly)
+    btn.setAttribute('aria-pressed', archiveFavOnly ? 'true' : 'false')
+    btn.textContent = archiveFavOnly ? '★ 收藏' : '☆ 收藏'
     renderArchive()
   })
 

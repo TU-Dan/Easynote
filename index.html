@@ -143,10 +143,13 @@
         <div id="archive-list-view">
           <div class="archive-toolbar">
             <input id="archive-search" class="archive-search" type="search" placeholder="搜索信里的内容或日期..." />
-            <div class="date-segment" id="archive-date-filters">
-              <button class="date-segment-btn active" data-range="all">全部</button>
-              <button class="date-segment-btn" data-range="7">近 7 日</button>
-              <button class="date-segment-btn" data-range="30">近 30 日</button>
+            <div class="archive-filter-row">
+              <div class="date-segment" id="archive-date-filters">
+                <button class="date-segment-btn active" data-range="all">全部</button>
+                <button class="date-segment-btn" data-range="7">近 7 日</button>
+                <button class="date-segment-btn" data-range="30">近 30 日</button>
+              </div>
+              <button id="archive-fav-filter" class="archive-fav-filter" type="button" aria-pressed="false">☆ 收藏</button>
             </div>
           </div>
           <div id="archive-list"></div>
@@ -157,7 +160,10 @@
           </div>
         </div>
         <div id="archive-detail" hidden>
-          <button id="archive-back-btn" class="ghost-btn archive-back">← 返回</button>
+          <div class="archive-detail-top">
+            <button id="archive-back-btn" class="ghost-btn archive-back">← 返回</button>
+            <button id="archive-fav-btn" class="ghost-btn archive-fav" type="button" aria-pressed="false">☆ 收藏</button>
+          </div>
           <article class="letter">
             <div id="archive-letter-date" class="letter-date"></div>
             <div id="archive-letter-body" class="letter-body"></div>

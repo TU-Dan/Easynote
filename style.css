@@ -872,6 +872,16 @@ html, body {
 .archive-search:focus { outline: none; border-color: var(--text); }
 .archive-search::placeholder { color: var(--text2); }
 .archive-noresult { text-align: center; color: var(--text2); font-size: 14px; padding: 40px 0; }
+.archive-filter-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.archive-fav-filter {
+  background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--text2);
+  font-family: inherit; font-size: 13px; padding: 6px 12px; cursor: pointer; white-space: nowrap;
+}
+.archive-fav-filter.active { color: #E0A526; border-color: #E0A526; }
+.archive-detail-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.archive-fav { white-space: nowrap; }
+.archive-fav.active { color: #E0A526; }
+.letter-star { color: #E0A526; }
 .reflection-block { margin-top: 4px; }
 #archive-reflection {
   width: 100%; min-height: 110px; margin-top: 8px; padding: 12px;
