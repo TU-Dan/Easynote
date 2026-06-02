@@ -488,21 +488,58 @@ function isArchived(card) {
   return card.done && card.date < daysAgoKey(7)
 }
 
-function weekStartKey() {
-  const d = new Date()
-  const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  const mon = new Date(d); mon.setDate(d.getDate() + diff)
-  return `${mon.getFullYear()}-${pad(mon.getMonth()+1)}-${pad(mon.getDate())}`
+// Parse ☐/☑ checkbox lines from raw records into todo candidates
+function extractCheckboxItems(entries) {
+  const items = []
+  for (const e of entries) {
+    const lines = (e.content || '')
+      .replace(/☐/g, '\n☐')
+      .replace(/☑/g, '\n☑')
+      .split('\n')
+    for (const raw of lines) {
+      const m = /^([☐☑])\s*(.+)$/.exec(raw.trim())
+      if (!m) continue
+      const text = m[2].trim()
+      if (!text) continue
+      items.push({ text, type: 'todo', done: m[1] === '☑', date: e.date })
+    }
+  }
+  return items
+}
+
+// Materialize ☐/☑ records into kanban cards so the board works without a summary
+function syncKanbanFromRecords() {
+  const items = extractCheckboxItems(db.getEntries())
+  if (!items.length) return
+  const cards = dedupeKanbanCards(db.getKanban())
+  const seen = new Set(cards.map(c => `${c.date}|${c.type}|${normalizeKanbanText(c.text)}`))
+  const additions = []
+  for (const it of items) {
+    const key = `${it.date}|${it.type}|${normalizeKanbanText(it.text)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    additions.push({
+      id: crypto.randomUUID(),
+      text: it.text,
+      type: it.type,
+      done: it.done,
+      date: it.date,
+      source: 'record'
+    })
+  }
+  if (!additions.length) return
+  db.saveKanban(dedupeKanbanCards([...cards, ...additions]))
+  queueSync(300)
 }
 
 function renderKanban() {
+  syncKanbanFromRecords()
   const allCards = db.getKanban()
   let cards = kanbanFilter === 'all' ? allCards : allCards.filter(c => c.type === kanbanFilter)
   if (kanbanDateFilter === 'today') {
     cards = cards.filter(c => c.date === todayKey() && !isArchived(c))
   } else if (kanbanDateFilter === 'week') {
-    const ws = weekStartKey()
+    const ws = daysAgoKey(6)
     cards = cards.filter(c => c.date >= ws && !isArchived(c))
   } else if (kanbanDateFilter === 'other') {
     if (kanbanDateFrom) {
@@ -524,7 +561,7 @@ function renderKanban() {
   const statsDated = kanbanDateFilter === 'today'
     ? statsBase.filter(c => c.date === todayKey() && !isArchived(c))
     : kanbanDateFilter === 'week'
-    ? (() => { const ws = weekStartKey(); return statsBase.filter(c => c.date >= ws && !isArchived(c)) })()
+    ? (() => { const ws = daysAgoKey(6); return statsBase.filter(c => c.date >= ws && !isArchived(c)) })()
     : kanbanDateFilter === 'other' && kanbanDateFrom
     ? (() => { const to = kanbanDateTo || kanbanDateFrom; return statsBase.filter(c => c.date >= kanbanDateFrom && c.date <= to) })()
     : statsBase.filter(c => !isArchived(c))
