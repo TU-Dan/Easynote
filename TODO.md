@@ -76,9 +76,14 @@ Goal:
 - Daily automated `pg_dump` of the self-hosted database, stored off the server.
 
 Implementation notes:
-- Cron on the host: `docker compose exec -T db pg_dump ...` → gzip → upload to Tencent COS (object storage) or copy to another machine.
-- Keep rolling retention (e.g., last 7-14 days).
+- Cron on the host: `docker compose exec -T db pg_dump ...` → gzip → store.
+- Two layers (near zero cost):
+  1. On-server copy under e.g. `~/backups/` — free, guards against accidental table drop / bad migration.
+  2. Off-site copy to Tencent COS — guards against losing the whole server (deletion, expiry, reclaim). Cost is negligible for this tiny DB (~cents/month; new-user free tier likely covers it). Requires activating COS (pay-as-you-go).
+- Free alternative to COS: scheduled download of the dump to the Mac / another machine.
+- Keep rolling retention (e.g., last 7-14 days); prune older.
 - Verify a restore at least once.
+- Reminder: also avoid loss-by-expiry — keep the Lighthouse instance renewed (paid through 2027 currently).
 
 Acceptance criteria:
 - A dated dump is produced daily and stored off-server.
