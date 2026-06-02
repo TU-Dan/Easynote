@@ -844,3 +844,30 @@ html, body {
 }
 .cal-action-ghost   { background: var(--surface2); color: var(--text2); }
 .cal-action-primary { background: var(--text);     color: var(--bg); }
+
+/* ── Archive (信箱) ── */
+.letter-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; border-bottom: 1px solid var(--border);
+  padding: 16px 0; cursor: pointer; font-family: inherit;
+}
+.letter-item-date { font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: .3px; margin-bottom: 4px; }
+.letter-badge { font-size: 11px; font-weight: 500; color: var(--text2); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; margin-left: 6px; }
+.letter-item-preview { font-size: 13px; color: var(--text2); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.archive-back { padding-left: 0; margin-bottom: 8px; }
+.letter { padding: 8px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.letter-date { font-size: 13px; color: var(--text2); letter-spacing: .3px; margin-bottom: 16px; }
+.letter-body { color: var(--text); }
+.letter-body h3 { font-size: 13px; font-weight: 700; margin: 16px 0 6px; letter-spacing: .2px; }
+.letter-body h3:first-child { margin-top: 0; }
+.letter-body p { margin-bottom: 8px; line-height: 1.7; }
+.letter-body ul { padding-left: 16px; margin-bottom: 8px; }
+.letter-body li { margin-bottom: 5px; line-height: 1.6; }
+.reflection-block { margin-top: 4px; }
+#archive-reflection {
+  width: 100%; min-height: 110px; margin-top: 8px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: none; color: var(--text);
+  font-family: inherit; font-size: 14px; line-height: 1.6; resize: vertical; box-sizing: border-box;
+}
+#archive-reflection:focus { outline: none; border-color: var(--text); }
+#archive-reflection-save { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }

@@ -231,6 +231,7 @@ function switchTab(tab) {
   document.querySelector(`.nav-btn[data-tab="${tab}"]`).classList.add('active')
   if (tab === 'today')  renderToday()
   if (tab === 'kanban') renderKanban()
+  if (tab === 'archive') renderArchive()
 }
 
 // ── Render: Capture tab ───────────────────────────────────
@@ -348,7 +349,7 @@ async function handleGenerateSummary() {
     }, today, db.getKanban())
     setSummaryProgress(100)
     const summaries = db.getSummaries()
-    summaries[today] = { text, ts: Date.now() }
+    summaries[today] = { ...(summaries[today] || {}), text, ts: Date.now() }
     db.saveSummaries(summaries)
     toast('今日总结已生成 ✓')
     summaryGenerating = false
@@ -373,6 +374,99 @@ async function handleGenerateSummary() {
     const hasSummary = !!db.getSummaries()[today]
     document.getElementById('today-summary-idle').hidden = hasSummary
     document.getElementById('today-summary-result').hidden = !hasSummary
+  }
+}
+
+// ── Archive (信箱) ─────────────────────────────────────────
+let archiveOpenDate = null
+
+function datesWithSummaries() {
+  const summaries = db.getSummaries()
+  return Object.keys(summaries)
+    .filter(d => (summaries[d]?.text || '').trim())
+    .sort((a, b) => b.localeCompare(a))
+}
+
+function summaryPlainPreview(text, n = 60) {
+  const plain = (text || '').replace(/[#>*`_\-]/g, '').replace(/\s+/g, ' ').trim()
+  return plain.length > n ? `${plain.slice(0, n)}…` : plain
+}
+
+function renderArchive() {
+  document.getElementById('archive-detail').hidden = true
+  document.getElementById('archive-list-view').hidden = false
+  const dates = datesWithSummaries()
+  const list = document.getElementById('archive-list')
+  const empty = document.getElementById('archive-empty')
+  if (!dates.length) {
+    list.innerHTML = ''
+    empty.hidden = false
+    return
+  }
+  empty.hidden = true
+  const summaries = db.getSummaries()
+  list.innerHTML = dates.map(d => {
+    const s = summaries[d]
+    const badge = (s?.reflection || '').trim() ? ' <span class="letter-badge">补充</span>' : ''
+    return `
+      <button class="letter-item js-letter" data-date="${d}">
+        <div class="letter-item-date">${d}${badge}</div>
+        <div class="letter-item-preview">${escHtml(summaryPlainPreview(s?.text))}</div>
+      </button>`
+  }).join('')
+}
+
+function openLetter(date) {
+  const s = db.getSummaries()[date]
+  if (!s) return
+  archiveOpenDate = date
+  document.getElementById('archive-list-view').hidden = true
+  document.getElementById('archive-detail').hidden = false
+  document.getElementById('archive-letter-date').textContent = date
+  document.getElementById('archive-letter-body').innerHTML = md2html(s.text || '')
+  document.getElementById('archive-reflection').value = s.reflection || ''
+}
+
+function closeLetter() {
+  archiveOpenDate = null
+  renderArchive()
+}
+
+function saveReflection() {
+  if (!archiveOpenDate) return
+  const val = document.getElementById('archive-reflection').value
+  const summaries = db.getSummaries()
+  summaries[archiveOpenDate] = { ...(summaries[archiveOpenDate] || {}), reflection: val, ts: Date.now() }
+  db.saveSummaries(summaries)
+  queueSync(300)
+  toast('补充已保存 ✓')
+}
+
+// Auto-generate summaries for past days that have records but no summary
+async function backfillSummaries() {
+  const settings = db.getSettings()
+  if (!settings.apiKey) return
+  const today = todayKey()
+  const floor = daysAgoKey(14)
+  const byDate = {}
+  for (const e of db.getEntries()) {
+    if (e.date >= today || e.date < floor) continue
+    ;(byDate[e.date] ||= []).push(e)
+  }
+  const summaries = db.getSummaries()
+  const targets = Object.keys(byDate)
+    .filter(d => !(summaries[d]?.text || '').trim())
+    .sort()
+  for (const date of targets) {
+    try {
+      const text = await generateDailySummary(byDate[date], { ...settings }, date, [])
+      if (!text || !text.trim()) continue
+      const cur = db.getSummaries()
+      cur[date] = { ...(cur[date] || {}), text, ts: Date.now() }
+      db.saveSummaries(cur)
+      queueSync(500)
+      if (activeTab === 'archive' && !archiveOpenDate) renderArchive()
+    } catch { /* skip failures silently, retry on next open */ }
   }
 }
 
@@ -978,6 +1072,7 @@ async function enterApp() {
   setSyncStatus(`已登录：${getCurrentUser()?.email || ''}`)
   renderAll()
   queueSync(100)
+  backfillSummaries()
   setTimeout(() => document.getElementById('capture-input').focus(), 150)
 }
 
@@ -1077,6 +1172,7 @@ function renderAll() {
   renderRecent()
   if (activeTab === 'today') renderToday()
   if (activeTab === 'kanban') renderKanban()
+  if (activeTab === 'archive' && !archiveOpenDate) renderArchive()
 }
 
 
@@ -1111,6 +1207,14 @@ function init() {
   document.querySelectorAll('.nav-btn').forEach(btn =>
     btn.addEventListener('click', () => switchTab(btn.dataset.tab))
   )
+
+  // Archive (信箱)
+  document.getElementById('archive-back-btn').addEventListener('click', closeLetter)
+  document.getElementById('archive-reflection-save').addEventListener('click', saveReflection)
+  document.getElementById('archive-list').addEventListener('click', e => {
+    const btn = e.target.closest('.js-letter')
+    if (btn) openLetter(btn.dataset.date)
+  })
 
   // Today: summary
   document.getElementById('today-gen-btn').addEventListener('click', handleGenerateSummary)
