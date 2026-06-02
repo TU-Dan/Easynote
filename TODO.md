@@ -105,3 +105,17 @@ Tasks:
 
 - On the 信箱 letter detail page, support a right-swipe gesture to return to the archive list, not only the 返回 button.
 - Should feel native (follow the finger / threshold to dismiss), and not interfere with text selection in the letter or the reflection textarea.
+
+## 8. Research: voice-to-text — rely on keyboard dictation or build it?
+
+Context:
+- The app icon is a microphone, but EasyNote has no in-app voice-to-text yet.
+- Most phone keyboards already have built-in dictation (iOS keyboard mic / 听写; Android Gboard 语音输入), which types into any text field, including our capture textarea.
+
+Investigate:
+- Which keyboards/OS versions ship usable built-in dictation by default (iOS dictation, Gboard, 搜狗/讯飞/百度输入法 voice), and how good Chinese recognition is.
+- Whether the built-in mic already satisfies the need (user taps keyboard mic, speaks, text lands in the capture box) — i.e., no development required.
+
+Decide:
+- If keyboard dictation is good enough → no build; just document/hint it to users.
+- If not (e.g., want one-tap record button, long-form transcription, or independence from keyboard) → scope an in-app recording + speech-to-text feature (Web Speech API where supported, or a server-side STT).
