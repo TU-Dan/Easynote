@@ -863,6 +863,15 @@ html, body {
 .letter-body p { margin-bottom: 8px; line-height: 1.7; }
 .letter-body ul { padding-left: 16px; margin-bottom: 8px; }
 .letter-body li { margin-bottom: 5px; line-height: 1.6; }
+.archive-toolbar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+.archive-search {
+  width: 100%; box-sizing: border-box; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: none; color: var(--text);
+  font-family: inherit; font-size: 14px;
+}
+.archive-search:focus { outline: none; border-color: var(--text); }
+.archive-search::placeholder { color: var(--text2); }
+.archive-noresult { text-align: center; color: var(--text2); font-size: 14px; padding: 40px 0; }
 .reflection-block { margin-top: 4px; }
 #archive-reflection {
   width: 100%; min-height: 110px; margin-top: 8px; padding: 12px;

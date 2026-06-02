@@ -141,6 +141,14 @@
       <!-- Archive (信箱) Tab -->
       <section id="tab-archive" class="tab-content">
         <div id="archive-list-view">
+          <div class="archive-toolbar">
+            <input id="archive-search" class="archive-search" type="search" placeholder="搜索信里的内容或日期..." />
+            <div class="date-segment" id="archive-date-filters">
+              <button class="date-segment-btn active" data-range="all">全部</button>
+              <button class="date-segment-btn" data-range="7">近 7 日</button>
+              <button class="date-segment-btn" data-range="30">近 30 日</button>
+            </div>
+          </div>
           <div id="archive-list"></div>
           <div id="archive-empty" class="empty-state" hidden>
             <div class="empty-icon">✉️</div>

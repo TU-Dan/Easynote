@@ -379,6 +379,8 @@ async function handleGenerateSummary() {
 
 // ── Archive (信箱) ─────────────────────────────────────────
 let archiveOpenDate = null
+let archiveSearch = ''
+let archiveRange = 'all'
 
 function datesWithSummaries() {
   const summaries = db.getSummaries()
@@ -395,16 +397,30 @@ function summaryPlainPreview(text, n = 60) {
 function renderArchive() {
   document.getElementById('archive-detail').hidden = true
   document.getElementById('archive-list-view').hidden = false
-  const dates = datesWithSummaries()
   const list = document.getElementById('archive-list')
   const empty = document.getElementById('archive-empty')
-  if (!dates.length) {
+  const allDates = datesWithSummaries()
+  if (!allDates.length) {
     list.innerHTML = ''
     empty.hidden = false
     return
   }
   empty.hidden = true
   const summaries = db.getSummaries()
+  const floor = archiveRange === 'all' ? '' : daysAgoKey(Number(archiveRange) - 1)
+  const q = archiveSearch.trim().toLowerCase()
+  const dates = allDates.filter(d => {
+    if (floor && d < floor) return false
+    if (q) {
+      const hay = `${d} ${summaries[d]?.letter || ''} ${summaries[d]?.reflection || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+  if (!dates.length) {
+    list.innerHTML = '<p class="archive-noresult">没有匹配的信</p>'
+    return
+  }
   list.innerHTML = dates.map(d => {
     const s = summaries[d]
     const badge = (s?.reflection || '').trim() ? ' <span class="letter-badge">补充</span>' : ''
@@ -1214,6 +1230,18 @@ function init() {
   document.getElementById('archive-list').addEventListener('click', e => {
     const btn = e.target.closest('.js-letter')
     if (btn) openLetter(btn.dataset.date)
+  })
+  document.getElementById('archive-search').addEventListener('input', e => {
+    archiveSearch = e.target.value
+    renderArchive()
+  })
+  document.getElementById('archive-date-filters').addEventListener('click', e => {
+    const btn = e.target.closest('.date-segment-btn')
+    if (!btn) return
+    archiveRange = btn.dataset.range
+    document.querySelectorAll('#archive-date-filters .date-segment-btn')
+      .forEach(b => b.classList.toggle('active', b === btn))
+    renderArchive()
   })
 
   // Today: summary
