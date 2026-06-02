@@ -100,3 +100,8 @@ Tasks:
 
 - Reset the cloud Supabase database password (it was exposed in chat during migration). Then pause or delete the now-unused cloud Supabase project once a final backup is taken.
 - Replace the Tencent main-account API key used by acme.sh with a least-privilege CAM sub-user key (DNS permission only), since it stays on the server for cert renewal.
+
+## 7. UX: swipe-right to go back from a letter
+
+- On the 信箱 letter detail page, support a right-swipe gesture to return to the archive list, not only the 返回 button.
+- Should feel native (follow the finger / threshold to dismiss), and not interfere with text selection in the letter or the reflection textarea.
