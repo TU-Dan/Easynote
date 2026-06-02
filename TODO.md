@@ -65,3 +65,38 @@ Acceptance criteria:
 - At ~23:00 CST, a letter is generated for each user's current day without opening the app.
 - Existing letters and user reflections are never overwritten.
 - Days without records are skipped.
+
+## 4. Ops: automatic database backup (high priority)
+
+Context:
+- All data now lives only on the single Shanghai server (self-hosted Postgres volume). No backup yet.
+- If the server is lost or the volume is deleted, all user data is gone. The cloud Supabase copy is only a pre-migration snapshot, not in sync.
+
+Goal:
+- Daily automated `pg_dump` of the self-hosted database, stored off the server.
+
+Implementation notes:
+- Cron on the host: `docker compose exec -T db pg_dump ...` → gzip → upload to Tencent COS (object storage) or copy to another machine.
+- Keep rolling retention (e.g., last 7-14 days).
+- Verify a restore at least once.
+
+Acceptance criteria:
+- A dated dump is produced daily and stored off-server.
+- A restore has been tested successfully at least once.
+
+## 5. Post-filing: switch interim HTTPS:8443 to standard 443
+
+Context:
+- Interim setup (pre-ICP) serves the app on a non-standard port: https://easynote.brainpowerai.com.cn:8443, cert via acme.sh DNS-01, Caddy reverse-proxying to Kong:8000.
+- After ICP filing clears, move to the standard 443 so the URL has no port suffix.
+
+Tasks:
+- Open 443 (and 80) in the server firewall once filed.
+- Point Caddy/site at :443; keep DNS-01 cert (or switch to normal HTTP-01 once 80 is allowed).
+- Update `supabase-config.js` url to `https://easynote.brainpowerai.com.cn` (no :8443).
+- Complete 公安备案 (public-security filing) if the province requires it; add the filing number to the site footer.
+
+## 6. Security cleanup
+
+- Reset the cloud Supabase database password (it was exposed in chat during migration). Then pause or delete the now-unused cloud Supabase project once a final backup is taken.
+- Replace the Tencent main-account API key used by acme.sh with a least-privilege CAM sub-user key (DNS permission only), since it stays on the server for cert renewal.
