@@ -1,6 +1,6 @@
 {
-  "name": "轻松记",
-  "short_name": "轻松记",
+  "name": "EasyNote",
+  "short_name": "EasyNote",
   "description": "快速记录，AI 总结",
   "start_url": "./",
   "display": "standalone",
@@ -18,13 +18,7 @@
       "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icons/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }
