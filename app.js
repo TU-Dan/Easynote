@@ -1,4 +1,4 @@
-import { generateDailySummary, extractAllFromSummary } from './api.js'
+import { generateDailySummary, generateDailyLetter, extractAllFromSummary } from './api.js'
 import { configureSync, resendSignupEmail, signInWithPassword, signUpWithPassword, signOutOfSync, getCurrentUser, pullSyncState, pushSyncState } from './supabase-sync.js'
 import { SUPABASE_CONFIG } from './supabase-config.js'
 
@@ -231,6 +231,7 @@ function switchTab(tab) {
   document.querySelector(`.nav-btn[data-tab="${tab}"]`).classList.add('active')
   if (tab === 'today')  renderToday()
   if (tab === 'kanban') renderKanban()
+  if (tab === 'archive') renderArchive()
 }
 
 // ── Render: Capture tab ───────────────────────────────────
@@ -348,7 +349,7 @@ async function handleGenerateSummary() {
     }, today, db.getKanban())
     setSummaryProgress(100)
     const summaries = db.getSummaries()
-    summaries[today] = { text, ts: Date.now() }
+    summaries[today] = { ...(summaries[today] || {}), text, ts: Date.now() }
     db.saveSummaries(summaries)
     toast('今日总结已生成 ✓')
     summaryGenerating = false
@@ -373,6 +374,138 @@ async function handleGenerateSummary() {
     const hasSummary = !!db.getSummaries()[today]
     document.getElementById('today-summary-idle').hidden = hasSummary
     document.getElementById('today-summary-result').hidden = !hasSummary
+  }
+}
+
+// ── Archive (信箱) ─────────────────────────────────────────
+let archiveOpenDate = null
+let archiveSearch = ''
+let archiveRange = 'all'
+let archiveFavOnly = false
+
+function datesWithSummaries() {
+  const summaries = db.getSummaries()
+  return Object.keys(summaries)
+    .filter(d => (summaries[d]?.letter || '').trim())
+    .sort((a, b) => b.localeCompare(a))
+}
+
+function summaryPlainPreview(text, n = 60) {
+  const plain = (text || '').replace(/[#>*`_\-]/g, '').replace(/\s+/g, ' ').trim()
+  return plain.length > n ? `${plain.slice(0, n)}…` : plain
+}
+
+function renderArchive() {
+  document.getElementById('archive-detail').hidden = true
+  document.getElementById('archive-list-view').hidden = false
+  const list = document.getElementById('archive-list')
+  const empty = document.getElementById('archive-empty')
+  const allDates = datesWithSummaries()
+  if (!allDates.length) {
+    list.innerHTML = ''
+    empty.hidden = false
+    return
+  }
+  empty.hidden = true
+  const summaries = db.getSummaries()
+  const floor = archiveRange === 'all' ? '' : daysAgoKey(Number(archiveRange) - 1)
+  const q = archiveSearch.trim().toLowerCase()
+  const dates = allDates.filter(d => {
+    if (archiveFavOnly && !summaries[d]?.favorite) return false
+    if (floor && d < floor) return false
+    if (q) {
+      const hay = `${d} ${summaries[d]?.letter || ''} ${summaries[d]?.reflection || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+  if (!dates.length) {
+    list.innerHTML = '<p class="archive-noresult">没有匹配的信</p>'
+    return
+  }
+  list.innerHTML = dates.map(d => {
+    const s = summaries[d]
+    const badge = (s?.reflection || '').trim() ? ' <span class="letter-badge">补充</span>' : ''
+    const star = s?.favorite ? '<span class="letter-star">★</span> ' : ''
+    return `
+      <button class="letter-item js-letter" data-date="${d}">
+        <div class="letter-item-date">${star}${d}${badge}</div>
+        <div class="letter-item-preview">${escHtml(summaryPlainPreview(s?.letter))}</div>
+      </button>`
+  }).join('')
+}
+
+function openLetter(date) {
+  const s = db.getSummaries()[date]
+  if (!s) return
+  archiveOpenDate = date
+  document.getElementById('archive-list-view').hidden = true
+  document.getElementById('archive-detail').hidden = false
+  document.getElementById('archive-letter-date').textContent = date
+  document.getElementById('archive-letter-body').innerHTML = md2html(s.letter || '')
+  document.getElementById('archive-reflection').value = s.reflection || ''
+  setFavButton(!!s.favorite)
+}
+
+function setFavButton(fav) {
+  const btn = document.getElementById('archive-fav-btn')
+  btn.classList.toggle('active', fav)
+  btn.setAttribute('aria-pressed', fav ? 'true' : 'false')
+  btn.textContent = fav ? '★ 已收藏' : '☆ 收藏'
+}
+
+function toggleFavorite() {
+  if (!archiveOpenDate) return
+  const summaries = db.getSummaries()
+  const cur = summaries[archiveOpenDate] || {}
+  const fav = !cur.favorite
+  summaries[archiveOpenDate] = { ...cur, favorite: fav, ts: Date.now() }
+  db.saveSummaries(summaries)
+  queueSync(300)
+  setFavButton(fav)
+  toast(fav ? '已收藏 ✓' : '已取消收藏')
+}
+
+function closeLetter() {
+  archiveOpenDate = null
+  renderArchive()
+}
+
+function saveReflection() {
+  if (!archiveOpenDate) return
+  const val = document.getElementById('archive-reflection').value
+  const summaries = db.getSummaries()
+  summaries[archiveOpenDate] = { ...(summaries[archiveOpenDate] || {}), reflection: val, ts: Date.now() }
+  db.saveSummaries(summaries)
+  queueSync(300)
+  toast('补充已保存 ✓')
+}
+
+// Auto-write a letter for past days that have records but no letter yet
+async function backfillLetters() {
+  const settings = db.getSettings()
+  if (!settings.apiKey) return
+  const today = todayKey()
+  const floor = daysAgoKey(14)
+  const byDate = {}
+  for (const e of db.getEntries()) {
+    if (e.date >= today || e.date < floor) continue
+    ;(byDate[e.date] ||= []).push(e)
+  }
+  const summaries = db.getSummaries()
+  const targets = Object.keys(byDate)
+    .filter(d => !(summaries[d]?.letter || '').trim())
+    .sort()
+  for (const date of targets) {
+    try {
+      const letter = await generateDailyLetter(byDate[date], { ...settings }, date)
+      if (!letter || !letter.trim()) continue
+      const cur = db.getSummaries()
+      cur[date] = { ...(cur[date] || {}), letter, ts: Date.now() }
+      db.saveSummaries(cur)
+      queueSync(500)
+      if (activeTab === 'archive' && !archiveOpenDate) renderArchive()
+    } catch { /* skip failures silently, retry on next open */ }
   }
 }
 
@@ -488,21 +621,58 @@ function isArchived(card) {
   return card.done && card.date < daysAgoKey(7)
 }
 
-function weekStartKey() {
-  const d = new Date()
-  const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  const mon = new Date(d); mon.setDate(d.getDate() + diff)
-  return `${mon.getFullYear()}-${pad(mon.getMonth()+1)}-${pad(mon.getDate())}`
+// Parse ☐/☑ checkbox lines from raw records into todo candidates
+function extractCheckboxItems(entries) {
+  const items = []
+  for (const e of entries) {
+    const lines = (e.content || '')
+      .replace(/☐/g, '\n☐')
+      .replace(/☑/g, '\n☑')
+      .split('\n')
+    for (const raw of lines) {
+      const m = /^([☐☑])\s*(.+)$/.exec(raw.trim())
+      if (!m) continue
+      const text = m[2].trim()
+      if (!text) continue
+      items.push({ text, type: 'todo', done: m[1] === '☑', date: e.date })
+    }
+  }
+  return items
+}
+
+// Materialize ☐/☑ records into kanban cards so the board works without a summary
+function syncKanbanFromRecords() {
+  const items = extractCheckboxItems(db.getEntries())
+  if (!items.length) return
+  const cards = dedupeKanbanCards(db.getKanban())
+  const seen = new Set(cards.map(c => `${c.date}|${c.type}|${normalizeKanbanText(c.text)}`))
+  const additions = []
+  for (const it of items) {
+    const key = `${it.date}|${it.type}|${normalizeKanbanText(it.text)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    additions.push({
+      id: crypto.randomUUID(),
+      text: it.text,
+      type: it.type,
+      done: it.done,
+      date: it.date,
+      source: 'record'
+    })
+  }
+  if (!additions.length) return
+  db.saveKanban(dedupeKanbanCards([...cards, ...additions]))
+  queueSync(300)
 }
 
 function renderKanban() {
+  syncKanbanFromRecords()
   const allCards = db.getKanban()
   let cards = kanbanFilter === 'all' ? allCards : allCards.filter(c => c.type === kanbanFilter)
   if (kanbanDateFilter === 'today') {
     cards = cards.filter(c => c.date === todayKey() && !isArchived(c))
   } else if (kanbanDateFilter === 'week') {
-    const ws = weekStartKey()
+    const ws = daysAgoKey(6)
     cards = cards.filter(c => c.date >= ws && !isArchived(c))
   } else if (kanbanDateFilter === 'other') {
     if (kanbanDateFrom) {
@@ -524,7 +694,7 @@ function renderKanban() {
   const statsDated = kanbanDateFilter === 'today'
     ? statsBase.filter(c => c.date === todayKey() && !isArchived(c))
     : kanbanDateFilter === 'week'
-    ? (() => { const ws = weekStartKey(); return statsBase.filter(c => c.date >= ws && !isArchived(c)) })()
+    ? (() => { const ws = daysAgoKey(6); return statsBase.filter(c => c.date >= ws && !isArchived(c)) })()
     : kanbanDateFilter === 'other' && kanbanDateFrom
     ? (() => { const to = kanbanDateTo || kanbanDateFrom; return statsBase.filter(c => c.date >= kanbanDateFrom && c.date <= to) })()
     : statsBase.filter(c => !isArchived(c))
@@ -941,6 +1111,7 @@ async function enterApp() {
   setSyncStatus(`已登录：${getCurrentUser()?.email || ''}`)
   renderAll()
   queueSync(100)
+  backfillLetters()
   setTimeout(() => document.getElementById('capture-input').focus(), 150)
 }
 
@@ -1040,6 +1211,7 @@ function renderAll() {
   renderRecent()
   if (activeTab === 'today') renderToday()
   if (activeTab === 'kanban') renderKanban()
+  if (activeTab === 'archive' && !archiveOpenDate) renderArchive()
 }
 
 
@@ -1074,6 +1246,35 @@ function init() {
   document.querySelectorAll('.nav-btn').forEach(btn =>
     btn.addEventListener('click', () => switchTab(btn.dataset.tab))
   )
+
+  // Archive (信箱)
+  document.getElementById('archive-back-btn').addEventListener('click', closeLetter)
+  document.getElementById('archive-reflection-save').addEventListener('click', saveReflection)
+  document.getElementById('archive-list').addEventListener('click', e => {
+    const btn = e.target.closest('.js-letter')
+    if (btn) openLetter(btn.dataset.date)
+  })
+  document.getElementById('archive-search').addEventListener('input', e => {
+    archiveSearch = e.target.value
+    renderArchive()
+  })
+  document.getElementById('archive-date-filters').addEventListener('click', e => {
+    const btn = e.target.closest('.date-segment-btn')
+    if (!btn) return
+    archiveRange = btn.dataset.range
+    document.querySelectorAll('#archive-date-filters .date-segment-btn')
+      .forEach(b => b.classList.toggle('active', b === btn))
+    renderArchive()
+  })
+  document.getElementById('archive-fav-btn').addEventListener('click', toggleFavorite)
+  document.getElementById('archive-fav-filter').addEventListener('click', e => {
+    archiveFavOnly = !archiveFavOnly
+    const btn = e.currentTarget
+    btn.classList.toggle('active', archiveFavOnly)
+    btn.setAttribute('aria-pressed', archiveFavOnly ? 'true' : 'false')
+    btn.textContent = archiveFavOnly ? '★ 收藏' : '☆ 收藏'
+    renderArchive()
+  })
 
   // Today: summary
   document.getElementById('today-gen-btn').addEventListener('click', handleGenerateSummary)

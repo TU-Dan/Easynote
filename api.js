@@ -182,6 +182,40 @@ export async function generateDailySummary(entries, settings, date, kanban = [])
   )
 }
 
+// A warm, reflective letter for the archive (信箱) — not a task list
+export function buildLetterPrompt(entries, date) {
+  const compact = entries.map(e => ({
+    time: new Date(e.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    content: e.content.replace(/\s+/g, ' ').trim()
+  }))
+  const text = compact.map((e, i) => `${i + 1}. [${e.time}] ${e.content}`).join('\n')
+
+  return `你是一位懂得倾听的朋友，正在给对方写一封信，回顾他这一天（${date}）。
+下面是他今天零散记下的内容：
+
+${text}
+
+请基于这些记录，写一封温暖、真诚的信。要求：
+- 用第二人称"你"，像一个懂他的朋友在回信。
+- 一页长信的篇幅，分几个自然段，铺陈细节、情绪的走向，以及一点真诚的反思或看见。
+- 从这些零散记录里读出今天的情绪基调、在意的事、隐约的纠结或微小的欢喜。
+- 不要罗列任务清单，不要用"待办/已完成/提醒"这类分类标题。
+- 不要编造记录里没有的事，但可以温柔地延伸、共情与体察。
+- 结尾用一两句话给他一点轻轻的鼓励或祝福，不煽情、不说教。
+- 用中文，语气克制而有温度。可以用"亲爱的"之类的称呼开头，但不要写日期抬头和落款署名。
+
+只输出信的正文。`
+}
+
+export async function generateDailyLetter(entries, settings, date) {
+  const prompt = buildLetterPrompt(entries, date)
+  return callDeepSeek(
+    [{ role: 'user', content: prompt }],
+    settings,
+    { controller: settings.controller, onChunk: settings.onChunk }
+  )
+}
+
 // Parse all typed items from AI summary text
 export function extractAllFromSummary(text) {
   const sections = [

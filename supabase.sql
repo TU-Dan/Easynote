@@ -15,11 +15,17 @@ create table if not exists public.qsj_summaries (
   user_id uuid not null references auth.users(id) on delete cascade,
   summary_date date not null,
   text text not null,
+  reflection text not null default '',
+  letter text not null default '',
+  favorite boolean not null default false,
   updated_ms bigint not null,
   client_id text,
   updated_at timestamptz not null default now(),
   primary key (user_id, summary_date)
 );
+alter table public.qsj_summaries add column if not exists reflection text not null default '';
+alter table public.qsj_summaries add column if not exists letter text not null default '';
+alter table public.qsj_summaries add column if not exists favorite boolean not null default false;
 
 create table if not exists public.qsj_kanban_cards (
   id uuid primary key,
