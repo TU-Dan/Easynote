@@ -166,14 +166,17 @@
         <div id="archive-detail" hidden>
           <div class="archive-detail-top">
             <button id="archive-back-btn" class="ghost-btn archive-back">← 返回</button>
-            <button id="archive-fav-btn" class="ghost-btn archive-fav" type="button" aria-pressed="false">☆ 收藏</button>
+            <div class="archive-detail-actions">
+              <button id="archive-share-btn" class="ghost-btn archive-share" type="button">分享</button>
+              <button id="archive-fav-btn" class="ghost-btn archive-fav" type="button" aria-pressed="false">☆ 收藏</button>
+            </div>
           </div>
           <article class="letter">
             <div id="archive-letter-date" class="letter-date"></div>
             <div id="archive-letter-body" class="letter-body"></div>
           </article>
           <div class="reflection-block">
-            <p class="section-label">我的补充</p>
+            <p class="section-label">附笔 · 我的补充</p>
             <textarea id="archive-reflection" placeholder="写下这一天的额外反思或后续想法..."></textarea>
             <button id="archive-reflection-save" class="ghost-btn">保存补充</button>
           </div>

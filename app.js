@@ -563,8 +563,12 @@ function openLetter(date) {
   if (!s) return
   archiveOpenDate = date
   document.getElementById('archive-list-view').hidden = true
-  document.getElementById('archive-detail').hidden = false
-  document.getElementById('archive-letter-date').textContent = date
+  const detail = document.getElementById('archive-detail')
+  detail.hidden = false
+  detail.style.transform = ''
+  detail.style.opacity = ''
+  detail.scrollTop = 0
+  document.getElementById('archive-letter-date').textContent = formatLetterDate(date)
   document.getElementById('archive-letter-body').innerHTML = md2html(s.letter || '')
   document.getElementById('archive-reflection').value = s.reflection || ''
   setFavButton(!!s.favorite)
@@ -602,6 +606,82 @@ function saveReflection() {
   db.saveSummaries(summaries)
   queueSync(300)
   toast('补充已保存 ✓')
+}
+
+function formatLetterDate(dateStr) {
+  const [y, m, d] = (dateStr || '').split('-').map(Number)
+  if (!y) return dateStr
+  const wk = new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('zh-CN', { weekday: 'long' })
+  return `${y}年${m}月${d}日 · ${wk}`
+}
+
+// Share the letter text + date (never the private reflection)
+async function shareLetter() {
+  if (!archiveOpenDate) return
+  const s = db.getSummaries()[archiveOpenDate]
+  if (!s || !(s.letter || '').trim()) { toast('这封信还没有内容'); return }
+  const body = s.letter.replace(/\*\*/g, '').trim()
+  const text = `${formatLetterDate(archiveOpenDate)}\n\n${body}\n\n—— 来自 EasyNote`
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: `EasyNote · ${archiveOpenDate}`, text })
+    } else {
+      await navigator.clipboard.writeText(text)
+      toast('已复制到剪贴板 ✓')
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return
+    try { await navigator.clipboard.writeText(text); toast('已复制到剪贴板 ✓') }
+    catch { toast('分享失败') }
+  }
+}
+
+// Right-swipe on the letter detail to go back (mirrors the recent-entry gesture)
+let letterSwipe = null
+function initLetterSwipe() {
+  const el = document.getElementById('archive-detail')
+  el.addEventListener('touchstart', onLetterTS, { passive: true })
+  el.addEventListener('touchmove', onLetterTM, { passive: false })
+  el.addEventListener('touchend', onLetterTE, { passive: true })
+}
+function onLetterTS(e) {
+  if (e.target.closest('textarea, input, button')) { letterSwipe = null; return }
+  letterSwipe = {
+    el: document.getElementById('archive-detail'),
+    startX: e.touches[0].clientX,
+    startY: e.touches[0].clientY,
+    type: 'pending'
+  }
+}
+function onLetterTM(e) {
+  if (!letterSwipe) return
+  const dx = e.touches[0].clientX - letterSwipe.startX
+  const dy = e.touches[0].clientY - letterSwipe.startY
+  if (letterSwipe.type === 'pending') {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return
+    if (dx <= 0 || Math.abs(dy) > Math.abs(dx)) { letterSwipe = null; return }
+    letterSwipe.type = 'swipe'
+  }
+  const x = Math.max(0, dx)
+  letterSwipe.el.style.transition = 'none'
+  letterSwipe.el.style.transform = `translateX(${x}px)`
+  letterSwipe.el.style.opacity = String(Math.max(0.4, 1 - x / 600))
+  e.preventDefault()
+}
+function onLetterTE(e) {
+  if (!letterSwipe || letterSwipe.type !== 'swipe') { letterSwipe = null; return }
+  const dx = e.changedTouches[0].clientX - letterSwipe.startX
+  const el = letterSwipe.el
+  el.style.transition = 'transform .2s ease, opacity .2s ease'
+  if (dx > 80) {
+    el.style.transform = 'translateX(100%)'
+    el.style.opacity = '0'
+    setTimeout(() => { el.style.transform = ''; el.style.opacity = ''; closeLetter() }, 180)
+  } else {
+    el.style.transform = 'translateX(0)'
+    el.style.opacity = '1'
+  }
+  letterSwipe = null
 }
 
 // Auto-write a letter for past days that have records but no letter yet
@@ -1439,6 +1519,8 @@ function init() {
     renderArchive()
   })
   document.getElementById('archive-fav-btn').addEventListener('click', toggleFavorite)
+  document.getElementById('archive-share-btn').addEventListener('click', shareLetter)
+  initLetterSwipe()
   document.getElementById('archive-fav-filter').addEventListener('click', e => {
     archiveFavOnly = !archiveFavOnly
     const btn = e.currentTarget
