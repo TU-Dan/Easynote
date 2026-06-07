@@ -222,6 +222,21 @@ export async function generateDailyLetter(entries, settings, date) {
   )
 }
 
+// Strip any leading bullets / checkboxes / numbering, in any order or repetition
+function stripItemPrefix(line) {
+  let s = line, prev
+  do {
+    prev = s
+    s = s
+      .replace(/^[-*]\s*/, '')
+      .replace(/^\[[ xX✓✔]\]\s*/, '')
+      .replace(/^[☐☑]\s*/, '')
+      .replace(/^\d+[.)、]\s*/, '')
+      .trim()
+  } while (s !== prev)
+  return s.replace(/\*\*/g, '').trim()
+}
+
 // Parse all typed items from AI summary text
 export function extractAllFromSummary(text) {
   const sections = [
@@ -232,8 +247,7 @@ export function extractAllFromSummary(text) {
     { emoji: '💭', type: 'thought',  done: false }
   ]
 
-  const items = []
-  const seen = new Set()
+  const byText = new Map()
   for (const { emoji, type, done } of sections) {
     const re = new RegExp(`###[^\\n]*${emoji}[^\\n]*\\n([\\s\\S]*?)(?=###|$)`)
     const match = text.match(re)
@@ -241,21 +255,14 @@ export function extractAllFromSummary(text) {
     match[1]
       .split('\n')
       .filter(l => l.trim().startsWith('-'))
-      .map(l => l
-        .replace(/^-\s*/, '')
-        .replace(/^\[[ xX✓✔]\]\s*/, '')
-        .replace(/^[☐☑]\s*/, '')
-        .replace(/^\d+[.)、]\s*/, '')
-        .replace(/\*\*/g, '')
-        .trim()
-      )
+      .map(stripItemPrefix)
       .filter(Boolean)
       .forEach(t => {
-        const key = `${type}|${done ? 'done' : 'open'}|${t.replace(/\s+/g, '').toLowerCase()}`
-        if (seen.has(key)) return
-        seen.add(key)
-        items.push({ type, text: t, done: !!done })
+        const key = t.replace(/\s+/g, '').toLowerCase()
+        const existing = byText.get(key)
+        if (!existing) byText.set(key, { type, text: t, done: !!done })
+        else if (done && !existing.done) existing.done = true   // 完成优先：任何板块标了完成即视为完成
       })
   }
-  return items
+  return [...byText.values()]
 }
