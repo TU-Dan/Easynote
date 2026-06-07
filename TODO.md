@@ -1,5 +1,23 @@
 # Project TODOs
 
+## Status (updated 2026-06-07)
+
+**Done & deployed:**
+- Batch 1 — #1 kanban shows ☐/☑ records without summary + rolling 7-day; #2 keyboard collapses on save; #3 records compact/timestamped/expandable/swipe-delete
+- Batch 2 — #4 Today page auto-organizes (hash-gated) + auto-adds to kanban; #5 kanban keyword search; #6 TODO prompt + parser hardened (cross-section dedup, completion wins, strips numbering/☐☑)
+- Batch 3 — #7 letter archive (信箱); #8 elegant "warm stationery" letter view; #9 share letter (native share / clipboard, letter text + date only); #10 swipe-right to go back
+- Bug fix — kanban: completed cards could not be un-checked (record re-materialized them); fixed
+- Letter length shortened (2-3 short paragraphs, 150-280 chars)
+
+**Pending:**
+- #11 server-side scheduled daily letter at 23:00 CST (after deploy/filing)
+- **#12 automatic database backup — HIGH PRIORITY (data is still single-copy on the server, no backup yet)**
+- #13 switch interim HTTPS:8443 to standard 443 (after ICP filing clears)
+- #14 security cleanup (reset the cloud DB password exposed during migration; least-privilege CAM key for acme.sh)
+- #15 research: voice-to-text vs rely on keyboard dictation
+
+Detailed specs below (kept for reference).
+
 ## Batch 1: Capture + raw-record kanban visibility
 
 These should be done together because they all touch the home capture flow, raw records, and how records become actionable items before AI summary generation.
