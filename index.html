@@ -29,6 +29,7 @@
           <input type="password" id="auth-password" placeholder="至少 6 位" autocomplete="current-password">
         </div>
         <button id="auth-submit-btn" class="primary-btn" type="button">登录</button>
+        <button id="local-dev-btn" class="secondary-btn auth-local-btn" type="button" hidden>本地测试，不登录</button>
         <button id="auth-resend-btn" class="secondary-btn auth-resend-btn" type="button" hidden>重发验证邮件</button>
         <p id="auth-status" class="auth-status"></p>
       </div>
@@ -54,8 +55,8 @@
             <span class="capture-kicker">快速记录</span>
             <span id="capture-today-label" class="capture-date"></span>
           </div>
-          <textarea id="capture-input" placeholder="记录任何事..." autofocus></textarea>
-          <button id="save-btn">保存</button>
+          <textarea id="capture-input" placeholder="记录任何事..." enterkeyhint="done" autofocus></textarea>
+          <button id="save-btn" type="button">保存</button>
         </div>
         <div class="recent-section">
           <p class="section-label">最近记录</p>
@@ -89,13 +90,13 @@
             <button id="today-summary-cancel-btn" class="summary-cancel-btn" type="button">取消</button>
           </div>
           <div id="today-summary-result" hidden>
+            <div class="summary-row">
+              <button id="today-regen-btn" class="summary-action-btn" type="button">重新整理</button>
+              <button id="today-edit-btn" class="summary-action-btn subtle" type="button">编辑</button>
+            </div>
             <div id="today-summary-preview" class="summary-card"></div>
             <textarea id="today-summary-text" class="summary-card summary-textarea" hidden></textarea>
-            <div class="summary-row">
-              <button id="today-add-kanban-btn" class="kanban-cta-btn">📋 加入看板</button>
-              <button id="today-edit-btn" class="ghost-btn">编辑</button>
-              <button id="today-regen-btn" class="ghost-btn">重新生成</button>
-            </div>
+            <button id="today-add-kanban-btn" class="kanban-cta-btn" type="button" hidden>加入看板</button>
           </div>
         </div>
 
@@ -129,12 +130,15 @@
           <button class="status-filter-btn active" data-status="open">未完成</button>
           <button class="status-filter-btn" data-status="done">已完成</button>
         </div>
+        <div class="kanban-search-wrap">
+          <input id="kanban-search" class="kanban-search" type="search" placeholder="搜索看板..." autocomplete="off">
+        </div>
         <div id="kanban-list"></div>
         <button id="kanban-clear-done-btn" class="ghost-btn kanban-clear-btn" hidden>清除已完成</button>
         <div id="kanban-empty" class="empty-state" hidden>
           <div class="empty-icon">📋</div>
           <p>看板空空如也</p>
-          <p class="empty-sub">从今日总结中加入事项</p>
+          <p class="empty-sub">记录里的待办会出现在这里</p>
         </div>
       </section>
 

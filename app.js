@@ -215,12 +215,16 @@ let calEnd   = null
 let kanbanStatusFilter = 'open'
 let authMode = 'login'
 let pendingConfirmationEmail = ''
+let localDevMode = false
 let summaryLoadingTimer = null
 let summaryProgressTimer = null
 let summaryProgress = 0
 let summaryController = null
 let summaryGenerating = false
 let summaryStreamingText = ''
+let summaryAutoAttemptKey = ''
+let kanbanSearch = ''
+const expandedRecentEntries = new Set()
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tab) {
@@ -229,7 +233,7 @@ function switchTab(tab) {
   document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'))
   document.getElementById(`tab-${tab}`).classList.add('active')
   document.querySelector(`.nav-btn[data-tab="${tab}"]`).classList.add('active')
-  if (tab === 'today')  renderToday()
+  if (tab === 'today')  { renderToday(); maybeAutoOrganizeToday() }
   if (tab === 'kanban') renderKanban()
   if (tab === 'archive') renderArchive()
 }
@@ -243,13 +247,31 @@ function renderRecent() {
     return
   }
   list.innerHTML = entries.map(e => `
-    <div class="entry-card">
-      <div class="entry-body">
-        <div class="entry-text">${escHtml(e.content)}</div>
-        <div class="entry-meta">${fmtTime(e.timestamp)}</div>
+    <div class="entry-card" data-id="${e.id}">
+      <div class="entry-del-bg">
+        <button class="entry-del-btn js-entry-del" data-id="${e.id}" type="button">删除</button>
+      </div>
+      <div class="entry-inner" data-id="${e.id}">
+        <time class="entry-time">${fmtTime(e.timestamp)}</time>
+        <div class="entry-body">
+          <div class="entry-text${expandedRecentEntries.has(e.id) ? ' expanded' : ''}">${escHtml(e.content)}</div>
+        </div>
       </div>
     </div>
   `).join('')
+
+  list.querySelectorAll('.entry-inner').forEach(inner => {
+    inner.addEventListener('click', () => {
+      const id = inner.dataset.id
+      if (expandedRecentEntries.has(id)) expandedRecentEntries.delete(id)
+      else expandedRecentEntries.add(id)
+      renderRecent()
+    })
+  })
+  list.querySelectorAll('.js-entry-del').forEach(btn =>
+    btn.addEventListener('click', () => deleteEntry(btn.dataset.id))
+  )
+  initRecentEntryGestures()
 }
 
 function saveEntry() {
@@ -259,15 +281,115 @@ function saveEntry() {
   const entries = db.getEntries()
   entries.push({ id: crypto.randomUUID(), content, timestamp: Date.now(), date: todayKey() })
   db.saveEntries(entries)
+  syncKanbanFromRecords()
   input.value = ''
-  input.focus()
+  input.blur()
   renderRecent()
+  if (activeTab === 'kanban') renderKanban()
+  if (activeTab === 'today') renderToday()
   toast('已保存 ✓')
+}
+
+function deleteEntry(id) {
+  if (!id) return
+  expandedRecentEntries.delete(id)
+  db.saveEntries(db.getEntries().filter(e => e.id !== id))
+  const entryIds = new Set(db.getEntries().map(e => e.id))
+  db.saveKanban(db.getKanban().filter(c => c.source !== 'record' || !c.sourceEntryId || entryIds.has(c.sourceEntryId)))
+  renderRecent()
+  if (activeTab === 'kanban') renderKanban()
+  if (activeTab === 'today') renderToday()
+  toast('已删除')
+}
+
+let recentGesture = null
+let recentSwiped = new Set()
+
+function initRecentEntryGestures() {
+  const list = document.getElementById('recent-list')
+  list.removeEventListener('touchstart', onRecentTS)
+  list.removeEventListener('touchmove', onRecentTM)
+  list.removeEventListener('touchend', onRecentTE)
+  list.addEventListener('touchstart', onRecentTS, { passive: true })
+  list.addEventListener('touchmove', onRecentTM, { passive: false })
+  list.addEventListener('touchend', onRecentTE, { passive: true })
+}
+
+function onRecentTS(e) {
+  const inner = e.target.closest('.entry-inner')
+  if (!inner) return
+  const id = inner.dataset.id
+  recentGesture = {
+    id,
+    inner,
+    startX: e.touches[0].clientX,
+    startY: e.touches[0].clientY,
+    baseX: recentSwiped.has(id) ? -72 : 0,
+    type: 'pending'
+  }
+}
+
+function onRecentTM(e) {
+  if (!recentGesture) return
+  const dx = e.touches[0].clientX - recentGesture.startX
+  const dy = e.touches[0].clientY - recentGesture.startY
+  if (recentGesture.type === 'pending') {
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return
+    if (Math.abs(dy) > Math.abs(dx)) { recentGesture = null; return }
+    recentGesture.type = 'swipe'
+  }
+  const x = Math.max(Math.min(recentGesture.baseX + dx, 0), -72)
+  recentGesture.inner.style.transition = 'none'
+  recentGesture.inner.style.transform = `translateX(${x}px)`
+  e.preventDefault()
+}
+
+function onRecentTE(e) {
+  if (!recentGesture) return
+  const dx = e.changedTouches[0].clientX - recentGesture.startX
+  const final = recentGesture.baseX + dx
+  recentGesture.inner.style.transition = 'transform .2s ease'
+  if (final < -36) {
+    recentGesture.inner.style.transform = 'translateX(-72px)'
+    recentSwiped.add(recentGesture.id)
+  } else {
+    recentGesture.inner.style.transform = 'translateX(0)'
+    recentSwiped.delete(recentGesture.id)
+  }
+  recentGesture = null
 }
 
 // ── Render: Today tab ─────────────────────────────────────
 function renderToday() {
   renderTodaySummaryArea()
+}
+
+function entryFingerprint(entries) {
+  return entries
+    .map(e => `${e.id}:${e.timestamp}:${e.content}`)
+    .join('|')
+}
+
+function todayEntriesAndHash() {
+  const today = todayKey()
+  const entries = db.getEntries().filter(e => e.date === today)
+  return { today, entries, hash: entryFingerprint(entries) }
+}
+
+function shouldAutoOrganizeToday() {
+  const settings = db.getSettings()
+  if (!settings.apiKey || summaryGenerating) return false
+  const { today, entries, hash } = todayEntriesAndHash()
+  if (!entries.length || !hash) return false
+  const saved = db.getSummaries()[today]
+  if (saved?.entryHash === hash && (saved?.text || '').trim()) return false
+  if (summaryAutoAttemptKey === `${today}:${hash}`) return false
+  return true
+}
+
+function maybeAutoOrganizeToday() {
+  if (!shouldAutoOrganizeToday()) return
+  handleGenerateSummary({ auto: true })
 }
 
 function renderTodaySummaryArea() {
@@ -304,11 +426,10 @@ function renderTodaySummaryArea() {
 
 
 // ── Today: generate summary ───────────────────────────────
-async function handleGenerateSummary() {
+async function handleGenerateSummary(options = {}) {
   const settings = db.getSettings()
   if (!settings.apiKey) { toast('请先在设置中配置 API Key'); openSettings(); return }
-  const today   = todayKey()
-  const entries = db.getEntries().filter(e => e.date === today)
+  const { today, entries, hash } = todayEntriesAndHash()
   if (!entries.length) { toast('今天还没有记录'); return }
 
   document.getElementById('today-summary-idle').hidden    = true
@@ -318,6 +439,7 @@ async function handleGenerateSummary() {
   document.getElementById('today-gen-btn').disabled = true
   document.getElementById('today-summary-loading-text').textContent = '正在归纳今天的内容...'
   summaryGenerating = true
+  summaryAutoAttemptKey = `${today}:${hash}`
   summaryStreamingText = ''
   renderStreamingSummary('')
   setSummaryProgress(4)
@@ -349,9 +471,8 @@ async function handleGenerateSummary() {
     }, today, db.getKanban())
     setSummaryProgress(100)
     const summaries = db.getSummaries()
-    summaries[today] = { ...(summaries[today] || {}), text, ts: Date.now() }
+    summaries[today] = { ...(summaries[today] || {}), text, entryHash: hash, ts: Date.now() }
     db.saveSummaries(summaries)
-    toast('今日总结已生成 ✓')
     summaryGenerating = false
     summaryStreamingText = ''
     document.getElementById('today-summary-loading').hidden = true
@@ -359,6 +480,8 @@ async function handleGenerateSummary() {
     document.getElementById('today-summary-preview').innerHTML = md2html(text)
     document.getElementById('today-summary-text').value = text
     showSummaryPreview()
+    addSummaryTextToKanban(text, { silent: true, stay: true })
+    toast(options.auto ? '今日已自动整理 ✓' : '今日总结已生成 ✓')
   } catch (err) {
     summaryGenerating = false
     summaryStreamingText = ''
@@ -543,15 +666,17 @@ function cancelSummaryGeneration() {
 }
 
 // ── Today: add to kanban ──────────────────────────────────
-function handleAddToKanban() {
+function addSummaryTextToKanban(text, options = {}) {
   const today = todayKey()
-  const text = document.getElementById('today-summary-text').value.trim()
   const items = text ? extractAllFromSummary(text) : []
-  if (!items.length) { toast('没有识别到可加入的事项'); return }
+  if (!items.length) {
+    if (!options.silent) toast('没有识别到可加入的事项')
+    return { added: 0, updated: 0 }
+  }
 
   // Persist any edits the user made
   const summaries = db.getSummaries()
-  if (summaries[today]) { summaries[today].text = text; db.saveSummaries(summaries) }
+  if (summaries[today]) { summaries[today].text = text; summaries[today].ts = Date.now(); db.saveSummaries(summaries) }
 
   const allCards = dedupeKanbanCards(db.getKanban())
   const reusableSummaryCards = allCards.filter(c =>
@@ -603,9 +728,18 @@ function handleAddToKanban() {
   }
   db.saveKanban(dedupeKanbanCards([...existing, ...newItems]))
 
-  if (added === 0 && updated === 0) { toast('看板已是最新'); return }
-  toast(added ? '已加入看板 ✓' : '看板已更新 ✓')
-  switchTab('kanban')
+  if (!options.silent) {
+    if (added === 0 && updated === 0) toast('看板已是最新')
+    else toast(added ? '已加入看板 ✓' : '看板已更新 ✓')
+  }
+  if (!options.stay && (added || updated)) switchTab('kanban')
+  if (activeTab === 'kanban') renderKanban()
+  return { added, updated }
+}
+
+function handleAddToKanban() {
+  const text = document.getElementById('today-summary-text').value.trim()
+  addSummaryTextToKanban(text)
 }
 
 
@@ -634,7 +768,7 @@ function extractCheckboxItems(entries) {
       if (!m) continue
       const text = m[2].trim()
       if (!text) continue
-      items.push({ text, type: 'todo', done: m[1] === '☑', date: e.date })
+      items.push({ text, type: 'todo', done: m[1] === '☑', date: e.date, sourceEntryId: e.id })
     }
   }
   return items
@@ -643,12 +777,14 @@ function extractCheckboxItems(entries) {
 // Materialize ☐/☑ records into kanban cards so the board works without a summary
 function syncKanbanFromRecords() {
   const items = extractCheckboxItems(db.getEntries())
-  if (!items.length) return
-  const cards = dedupeKanbanCards(db.getKanban())
-  const seen = new Set(cards.map(c => `${c.date}|${c.type}|${normalizeKanbanText(c.text)}`))
+  const entryIds = new Set(db.getEntries().map(e => e.id))
+  const cards = dedupeKanbanCards(db.getKanban()).filter(c =>
+    c.source !== 'record' || !c.sourceEntryId || entryIds.has(c.sourceEntryId)
+  )
+  const seen = new Set(cards.map(c => `${c.date}|${c.type}|${c.done ? 'done' : 'open'}|${normalizeKanbanText(c.text)}`))
   const additions = []
   for (const it of items) {
-    const key = `${it.date}|${it.type}|${normalizeKanbanText(it.text)}`
+    const key = `${it.date}|${it.type}|${it.done ? 'done' : 'open'}|${normalizeKanbanText(it.text)}`
     if (seen.has(key)) continue
     seen.add(key)
     additions.push({
@@ -657,11 +793,13 @@ function syncKanbanFromRecords() {
       type: it.type,
       done: it.done,
       date: it.date,
-      source: 'record'
+      source: 'record',
+      sourceEntryId: it.sourceEntryId
     })
   }
-  if (!additions.length) return
-  db.saveKanban(dedupeKanbanCards([...cards, ...additions]))
+  const next = dedupeKanbanCards([...cards, ...additions])
+  if (!additions.length && next.length === db.getKanban().length) return
+  db.saveKanban(next)
   queueSync(300)
 }
 
@@ -682,6 +820,10 @@ function renderKanban() {
       cards = []
     }
   }
+  const q = kanbanSearch.trim().toLowerCase()
+  if (q) {
+    cards = cards.filter(c => `${c.text} ${c.date} ${FILTER_LABELS[c.type] || c.type}`.toLowerCase().includes(q))
+  }
   cards = kanbanStatusFilter === 'done' ? cards.filter(c => c.done) : cards.filter(c => !c.done)
   const list     = document.getElementById('kanban-list')
   const empty    = document.getElementById('kanban-empty')
@@ -698,8 +840,11 @@ function renderKanban() {
     : kanbanDateFilter === 'other' && kanbanDateFrom
     ? (() => { const to = kanbanDateTo || kanbanDateFrom; return statsBase.filter(c => c.date >= kanbanDateFrom && c.date <= to) })()
     : statsBase.filter(c => !isArchived(c))
-  const openCount = statsDated.filter(c => !c.done).length
-  const doneCount = statsDated.filter(c => c.done).length
+  const statsSearched = q
+    ? statsDated.filter(c => `${c.text} ${c.date} ${FILTER_LABELS[c.type] || c.type}`.toLowerCase().includes(q))
+    : statsDated
+  const openCount = statsSearched.filter(c => !c.done).length
+  const doneCount = statsSearched.filter(c => c.done).length
   // Put counts on the status filter tabs
   const openBtn = document.querySelector('#kanban-status-filters [data-status="open"]')
   const doneBtn = document.querySelector('#kanban-status-filters [data-status="done"]')
@@ -1087,12 +1232,14 @@ async function initAuth() {
       onRemoteState: applyRemoteState
     })
 
+    if (localDevMode) return
     if (!user) {
       showAuthScreen()
       return
     }
     await enterApp()
   } catch (err) {
+    if (localDevMode) return
     showAuthScreen(`登录服务不可用：${err.message}`)
   }
 }
@@ -1121,6 +1268,21 @@ function showAuthScreen(message = '') {
   setAuthStatus(message)
 }
 
+function isLocalDevHost() {
+  return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+}
+
+function enterLocalDevApp() {
+  localDevMode = true
+  syncReady = false
+  applyingRemoteState = false
+  document.getElementById('auth-screen').hidden = true
+  document.getElementById('app-shell').hidden = false
+  setSyncStatus('本地测试模式：未连接同步')
+  renderAll()
+  setTimeout(() => document.getElementById('capture-input').focus(), 150)
+}
+
 function setAuthMode(mode) {
   authMode = mode
   document.getElementById('auth-login-tab').classList.toggle('active', mode === 'login')
@@ -1137,6 +1299,7 @@ function setAuthStatus(text) {
 }
 
 async function handleAuthSubmit() {
+  localDevMode = false
   if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) {
     setAuthStatus('应用还没有配置 Supabase')
     return
@@ -1196,6 +1359,7 @@ async function handleResendSignupEmail() {
 
 async function handleSignOut() {
   try {
+    localDevMode = false
     syncReady = false
     await signOutOfSync()
     clearLocalData()
@@ -1228,6 +1392,11 @@ function init() {
   document.getElementById('auth-login-tab').addEventListener('click', () => setAuthMode('login'))
   document.getElementById('auth-register-tab').addEventListener('click', () => setAuthMode('register'))
   document.getElementById('auth-submit-btn').addEventListener('click', handleAuthSubmit)
+  const localDevBtn = document.getElementById('local-dev-btn')
+  if (isLocalDevHost()) {
+    localDevBtn.hidden = false
+    localDevBtn.addEventListener('click', enterLocalDevApp)
+  }
   document.getElementById('auth-resend-btn').addEventListener('click', handleResendSignupEmail)
   document.getElementById('auth-password').addEventListener('keydown', e => {
     if (e.key === 'Enter') handleAuthSubmit()
@@ -1239,7 +1408,10 @@ function init() {
   // Capture
   document.getElementById('save-btn').addEventListener('click', saveEntry)
   document.getElementById('capture-input').addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveEntry()
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault()
+      saveEntry()
+    }
   })
 
   // Tabs
@@ -1295,6 +1467,8 @@ function init() {
       const s = db.getSummaries()
       if (s[today]) { s[today].text = text; db.saveSummaries(s) }
       document.getElementById('today-summary-preview').innerHTML = md2html(text)
+      addSummaryTextToKanban(text, { silent: true, stay: true })
+      toast('整理已更新 ✓')
       showSummaryPreview()
     } else {
       showSummaryEdit()
@@ -1357,6 +1531,11 @@ function init() {
     if (!btn) return
     kanbanStatusFilter = btn.dataset.status
     document.querySelectorAll('#kanban-status-filters .status-filter-btn').forEach(b => b.classList.toggle('active', b === btn))
+    renderKanban()
+  })
+
+  document.getElementById('kanban-search').addEventListener('input', e => {
+    kanbanSearch = e.target.value
     renderKanban()
   })
 

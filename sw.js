@@ -1,4 +1,4 @@
-const CACHE = 'qsj-v8'
+const CACHE = 'qsj-v9'
 
 self.addEventListener('install', e => {
   self.skipWaiting()

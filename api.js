@@ -140,16 +140,21 @@ ${text}
 如果某个板块没有内容，就跳过该板块。
 为了让“加入看板”能识别事项，请在 Todo、已完成、重要提醒这几个板块中使用 "- " 输出条目；其他板块可以按最自然的方式表达。
 请覆盖今天的所有记录，每一条都要有所呈现，不要遗漏任何一条。可以合并高度相似的内容，但不能跳过。
+同一个事项只能出现一次。不要在 Todo 和已完成中重复同一件事。
+每条看板候选事项必须是一个独立动作或明确结果，不要把多个无关事项塞进一条。
+条目文字不要带 "☐"、"☑"、编号、状态标签或多余解释。
 
 ### 📋 Todo 回顾
 - **默认分类**：任何需要去做、打算去做、计划中的事项，都放这里。
 - 没有符号、没有截止时间、语义模糊的可执行条目，统一归 Todo，不要归提醒。
 - ☑ 项不放这里。最多 8 条。
+- 每条用 "- " 开头，写成可直接放进看板的短句。
 
 ### ✅ 已完成
 - 只列出明确带有 "☑" 符号、或句子中有"已完成""做完了""搞定了"等明确完成语义的事项。
 - 没有 ☑ 符号、且语义模糊或未来导向（如"头发补色""制定计划"）的条目，一律不放这里，归 Todo 或提醒。
 - 宁可少归已完成，不要误判。最多 6 条。
+- 每条用 "- " 开头，写成已经完成的结果，不要再像待办一样表达。
 
 ### 💭 感触洞见
 - 仅当记录中确实有深度判断、反思或方向感时才输出，最多 3 条。
@@ -161,6 +166,7 @@ ${text}
 ### ⏰ 重要提醒
 - 只放有明确截止时间、或用了"提醒""记得""别忘""deadline"等字眼的内容。
 - 普通的计划和待办（如"头发补色""制定计划"）不放这里，放 Todo。最多 4 条。
+- 每条用 "- " 开头。
 
 ### ✨ 今日寄语
 - 仅当今天的记录有足够的情感厚度或值得回味的内容时才写，一句话，温和有力量。
@@ -227,6 +233,7 @@ export function extractAllFromSummary(text) {
   ]
 
   const items = []
+  const seen = new Set()
   for (const { emoji, type, done } of sections) {
     const re = new RegExp(`###[^\\n]*${emoji}[^\\n]*\\n([\\s\\S]*?)(?=###|$)`)
     const match = text.match(re)
@@ -234,9 +241,21 @@ export function extractAllFromSummary(text) {
     match[1]
       .split('\n')
       .filter(l => l.trim().startsWith('-'))
-      .map(l => l.replace(/^-\s*/, '').replace(/\*\*/g, '').trim())
+      .map(l => l
+        .replace(/^-\s*/, '')
+        .replace(/^\[[ xX✓✔]\]\s*/, '')
+        .replace(/^[☐☑]\s*/, '')
+        .replace(/^\d+[.)、]\s*/, '')
+        .replace(/\*\*/g, '')
+        .trim()
+      )
       .filter(Boolean)
-      .forEach(t => items.push({ type, text: t, done: !!done }))
+      .forEach(t => {
+        const key = `${type}|${done ? 'done' : 'open'}|${t.replace(/\s+/g, '').toLowerCase()}`
+        if (seen.has(key)) return
+        seen.add(key)
+        items.push({ type, text: t, done: !!done })
+      })
   }
   return items
 }

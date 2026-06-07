@@ -108,6 +108,10 @@ html, body {
   width: 100%;
   margin-top: 10px;
 }
+.auth-local-btn {
+  width: 100%;
+  margin-top: 10px;
+}
 
 /* ── Header ── */
 #header {
@@ -209,14 +213,60 @@ html, body {
 }
 
 .entry-card {
-  padding: 9px 0;
+  position: relative;
+  overflow: hidden;
   border-bottom: 1px solid var(--border);
+}
+.entry-del-bg {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 72px;
+  background: var(--danger);
   display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.entry-del-btn {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 10px;
+}
+.entry-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
   gap: 10px;
-  align-items: flex-start;
+  min-height: 42px;
+  padding: 9px 0;
+  background: var(--bg);
+  transition: transform .15s ease;
 }
 .entry-body { flex: 1; min-width: 0; }
-.entry-text { font-size: 13px; line-height: 1.5; color: var(--text2); word-break: break-all; }
+.entry-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.entry-text.expanded {
+  white-space: normal;
+  word-break: break-all;
+}
+.entry-time {
+  width: 40px;
+  flex-shrink: 0;
+  color: var(--text2);
+  font-size: 11px;
+  letter-spacing: .3px;
+  font-variant-numeric: tabular-nums;
+}
 .entry-meta { font-size: 11px; color: var(--text2); margin-top: 3px; letter-spacing: .3px; }
 .entry-del { background: none; border: none; color: var(--text2); cursor: pointer; padding: 2px 4px; font-size: 15px; flex-shrink: 0; opacity: .5; }
 
@@ -387,7 +437,24 @@ html, body {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 24px;
+  margin-bottom: 10px;
+}
+.summary-action-btn {
+  flex: 1;
+  border: 1px solid var(--text);
+  background: var(--text);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.summary-action-btn.subtle {
+  border-color: var(--border);
+  background: var(--surface2);
+  color: var(--text);
 }
 .kanban-cta-btn {
   flex: 1;
@@ -522,6 +589,24 @@ html, body {
 .status-filter-btn.active {
   color: var(--text);
   box-shadow: inset 0 -1px 0 var(--text);
+}
+.kanban-search-wrap {
+  margin: 0 0 8px;
+}
+.kanban-search {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.kanban-search:focus {
+  border-color: var(--text);
+  background: var(--surface);
 }
 
 .k-card {
