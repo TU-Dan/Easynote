@@ -781,10 +781,10 @@ function syncKanbanFromRecords() {
   const cards = dedupeKanbanCards(db.getKanban()).filter(c =>
     c.source !== 'record' || !c.sourceEntryId || entryIds.has(c.sourceEntryId)
   )
-  const seen = new Set(cards.map(c => `${c.date}|${c.type}|${c.done ? 'done' : 'open'}|${normalizeKanbanText(c.text)}`))
+  const seen = new Set(cards.map(c => `${c.date}|${c.type}|${normalizeKanbanText(c.text)}`))
   const additions = []
   for (const it of items) {
-    const key = `${it.date}|${it.type}|${it.done ? 'done' : 'open'}|${normalizeKanbanText(it.text)}`
+    const key = `${it.date}|${it.type}|${normalizeKanbanText(it.text)}`
     if (seen.has(key)) continue
     seen.add(key)
     additions.push({
