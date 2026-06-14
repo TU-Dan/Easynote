@@ -786,9 +786,8 @@ function addSummaryTextToKanban(text, options = {}) {
 
     const reusable = reusableSummaryCards.find(c =>
       !reusedIds.has(c.id) &&
-      c.type === candidate.type &&
-      !!c.done === !!candidate.done &&
-      textSimilarity(c.text, candidate.text) >= 0.65
+      (normalizeKanbanText(c.text) === candNorm ||
+       (c.type === candidate.type && textSimilarity(c.text, candidate.text) >= 0.65))
     )
     if (reusable) reusedIds.add(reusable.id)
     if (reusable) {
@@ -803,7 +802,8 @@ function addSummaryTextToKanban(text, options = {}) {
       id: reusable?.id || crypto.randomUUID(),
       text: candidate.text,
       type: candidate.type,
-      done: candidate.done,
+      // keep a manually-completed card completed across re-organize (completion wins)
+      done: reusable ? (reusable.done || candidate.done) : candidate.done,
       date: today,
       source: 'summary'
     })
