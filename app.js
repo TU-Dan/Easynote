@@ -1337,6 +1337,7 @@ async function enterApp() {
   applyingRemoteState = false
   document.getElementById('auth-screen').hidden = true
   document.getElementById('app-shell').hidden = false
+  hideSplash()
   setSyncStatus(`已登录：${getCurrentUser()?.email || ''}`)
   renderAll()
   queueSync(100)
@@ -1347,7 +1348,28 @@ async function enterApp() {
 function showAuthScreen(message = '') {
   document.getElementById('app-shell').hidden = true
   document.getElementById('auth-screen').hidden = false
+  hideSplash()
   setAuthStatus(message)
+}
+
+const DAILY_QUOTES = [
+  '把今天的零碎，收进一页安静。',
+  '慢一点，也是一种前进。',
+  '记下来，心就轻了。',
+  '你已经做得很好了。',
+  '微小的坚持，终会发光。',
+  '允许自己，有一个普通的今天。',
+  '认真生活的人，值得被温柔记录。'
+]
+function hideSplash() {
+  const s = document.getElementById('splash')
+  if (s) s.hidden = true
+}
+function showDailyQuote() {
+  const d = new Date()
+  const idx = (d.getFullYear() * 372 + d.getMonth() * 31 + d.getDate()) % DAILY_QUOTES.length
+  const el = document.getElementById('splash-quote')
+  if (el) el.textContent = DAILY_QUOTES[idx]
 }
 
 function isLocalDevHost() {
@@ -1360,6 +1382,7 @@ function enterLocalDevApp() {
   applyingRemoteState = false
   document.getElementById('auth-screen').hidden = true
   document.getElementById('app-shell').hidden = false
+  hideSplash()
   setSyncStatus('本地测试模式：未连接同步')
   renderAll()
   setTimeout(() => document.getElementById('capture-input').focus(), 150)
@@ -1463,6 +1486,7 @@ function renderAll() {
 
 // ── Init ──────────────────────────────────────────────────
 function init() {
+  showDailyQuote()
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker
       .register('sw.js', { updateViaCache: 'none' })

@@ -53,6 +53,19 @@ html, body {
   height: 100%;
 }
 
+/* ── Splash ── */
+.splash {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); padding: 24px;
+}
+.splash-inner { text-align: center; }
+.splash-brand { font-size: 30px; font-weight: 700; letter-spacing: .5px; color: var(--text); }
+.splash-quote {
+  margin-top: 16px; font-size: 15px; line-height: 1.7; color: var(--text2);
+  font-family: "Songti SC", "STSong", Georgia, serif;
+}
+
 /* ── Auth ── */
 .auth-screen {
   display: flex;
