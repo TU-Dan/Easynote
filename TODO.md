@@ -10,6 +10,8 @@
 - Letter length shortened (2-3 short paragraphs, 150-280 chars)
 
 **Pending:**
+- #16 fix login-screen flash on launch (show splash / "每日一句话" instead)
+- #17 + #18 fix Today-organize resurfacing old / completed kanban items (drop kanban context from prompt + exact dedup on insert)
 - #11 server-side scheduled daily letter at 23:00 CST (after deploy/filing)
 - **#12 automatic database backup — HIGH PRIORITY (data is still single-copy on the server, no backup yet)**
 - #13 switch interim HTTPS:8443 to standard 443 (after ICP filing clears)
@@ -246,3 +248,36 @@ Investigate:
 Decision:
 - If keyboard dictation is good enough, document or hint it to users.
 - If not, scope an in-app recording + speech-to-text feature.
+
+## Batch 7: Launch & today-organize polish
+
+### 16. Fix: login screen flashes on launch even when already logged in
+
+Cause:
+- index.html shows `#auth-screen` (the login form) by default; `#app-shell` is hidden.
+- On launch `initAuth()` awaits an async session check (read stored session + possible token refresh over the network — a few seconds on weak mobile) before `enterApp()` hides the login form. So an already-logged-in user sees the login page for a few seconds.
+
+Fix:
+- Show a neutral splash on launch (app name / a rotating "每日一句话"); keep both the login form and the app hidden until the session resolves, then route to app or login.
+- Optionally persist a "was-logged-in" flag in localStorage so the splash (not the login form) is the default for returning users.
+
+Acceptance:
+- Launching while logged in shows splash → app, never the login form.
+- Launching while logged out shows splash → login form.
+
+### 17 + 18. Fix: Today-organize resurfaces old / completed kanban items
+
+Symptoms:
+- #17 old open kanban items get re-added into today's TODO.
+- #18 already-completed items reappear in today's organize.
+
+Cause (shared):
+- Today-organize only reads today's records (`e.date === today`), but `buildDailySummaryPrompt` feeds the entire kanban (all open + done cards) as "看板现有状态" context. The model re-emits those reference items into the Todo / 已完成 sections, and they get re-added with today's date.
+- Insert-time dedup uses fuzzy `textSimilarity >= 0.65`, so rephrased items slip through.
+
+Fix:
+- Stop feeding existing kanban items into the today-summary prompt (remove the kanban context block), so the model organizes only today's records.
+- On insert (`addSummaryTextToKanban`), dedup by normalized text against ALL existing cards (any date, any status) with exact match — never re-add a card whose text already exists; completed ones are never re-listed.
+
+Acceptance:
+- Add a record today, organize: only today's new items are added; old open items and completed items are not duplicated into today.
