@@ -776,10 +776,12 @@ function addSummaryTextToKanban(text, options = {}) {
     if (batchKeys.has(key)) continue
     batchKeys.add(key)
 
+    // Skip if this item already exists anywhere on the board (any date/type/status),
+    // so old or completed items don't resurface in today's organize.
+    const candNorm = normalizeKanbanText(candidate.text)
     if (existing.some(c =>
-      c.type === candidate.type &&
-      !!c.done === !!candidate.done &&
-      textSimilarity(c.text, candidate.text) >= 0.65
+      normalizeKanbanText(c.text) === candNorm ||
+      (c.type === candidate.type && textSimilarity(c.text, candidate.text) >= 0.65)
     )) continue
 
     const reusable = reusableSummaryCards.find(c =>

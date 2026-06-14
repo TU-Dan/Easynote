@@ -114,17 +114,9 @@ export function buildDailySummaryPrompt(entries, date, kanban = []) {
       .trim()
   }))
   const text = compactEntries.map((e, i) => `${i + 1}. [${e.time}]\n${e.content}`).join('\n\n')
-  const openItems = kanban.filter(c => !c.done)
-  const doneItems = kanban.filter(c => c.done)
-  const kanbanSection = (openItems.length || doneItems.length) ? `
-看板现有状态（仅供参考，用于判断完成情况，不要因此跳过今日记录）：
-${openItems.length ? `待完成：\n${openItems.map(c => `- ${c.text}`).join('\n')}` : ''}
-${doneItems.length ? `已完成：\n${doneItems.map(c => `- ${c.text}`).join('\n')}` : ''}
----
-` : ''
 
   return `你是用户的私人助理，帮助把零散记录整理成清晰、可执行的一日总结。
-${kanbanSection}
+只依据下面今天的记录来判断，不要凭空补充历史事项。
 用户今天（${date}）的记录（未分类，请自行判断类型）：
 
 ${text}
