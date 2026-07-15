@@ -17,6 +17,7 @@
       <div class="splash-inner">
         <div class="splash-brand">EasyNote</div>
         <p id="splash-quote" class="splash-quote"></p>
+        <div class="splash-dots" aria-hidden="true"><i></i><i></i><i></i></div>
       </div>
     </section>
     <section id="auth-screen" class="auth-screen" hidden>
@@ -56,6 +57,10 @@
 
       <!-- Capture Tab -->
       <section id="tab-capture" class="tab-content active">
+        <div id="daily-quote-banner" class="daily-quote-banner" hidden>
+          <span id="daily-quote-text" class="daily-quote-text"></span>
+          <button id="daily-quote-close" class="daily-quote-close" type="button" aria-label="关闭每日一句">✕</button>
+        </div>
         <div class="capture-card">
           <div class="capture-head">
             <span class="capture-kicker">快速记录</span>

@@ -1361,15 +1361,34 @@ const DAILY_QUOTES = [
   '允许自己，有一个普通的今天。',
   '认真生活的人，值得被温柔记录。'
 ]
+const SPLASH_MIN_MS = 1600
+const splashShownAt = Date.now()
 function hideSplash() {
   const s = document.getElementById('splash')
-  if (s) s.hidden = true
+  if (!s || s.hidden) return
+  const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - splashShownAt))
+  setTimeout(() => {
+    s.classList.add('splash-hide')
+    setTimeout(() => { s.hidden = true }, 380)
+  }, wait)
 }
-function showDailyQuote() {
+function todayQuote() {
   const d = new Date()
   const idx = (d.getFullYear() * 372 + d.getMonth() * 31 + d.getDate()) % DAILY_QUOTES.length
+  return DAILY_QUOTES[idx]
+}
+function showDailyQuote() {
   const el = document.getElementById('splash-quote')
-  if (el) el.textContent = DAILY_QUOTES[idx]
+  if (el) el.textContent = todayQuote()
+  const banner = document.getElementById('daily-quote-banner')
+  if (banner && localStorage.getItem('daily_quote_dismissed') !== todayKey()) {
+    document.getElementById('daily-quote-text').textContent = todayQuote()
+    banner.hidden = false
+  }
+}
+function dismissDailyQuote() {
+  localStorage.setItem('daily_quote_dismissed', todayKey())
+  document.getElementById('daily-quote-banner').hidden = true
 }
 
 function isLocalDevHost() {
@@ -1487,6 +1506,7 @@ function renderAll() {
 // ── Init ──────────────────────────────────────────────────
 function init() {
   showDailyQuote()
+  document.getElementById('daily-quote-close').addEventListener('click', dismissDailyQuote)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker
       .register('sw.js', { updateViaCache: 'none' })

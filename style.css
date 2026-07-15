@@ -58,13 +58,55 @@ html, body {
   position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: center; justify-content: center;
   background: var(--bg); padding: 24px;
+  transition: opacity .35s ease;
 }
+.splash.splash-hide { opacity: 0; pointer-events: none; }
 .splash-inner { text-align: center; }
-.splash-brand { font-size: 30px; font-weight: 700; letter-spacing: .5px; color: var(--text); }
+.splash-brand {
+  font-size: 30px; font-weight: 700; letter-spacing: .5px; color: var(--text);
+  animation: splash-rise .55s ease-out both;
+}
 .splash-quote {
   margin-top: 16px; font-size: 15px; line-height: 1.7; color: var(--text2);
   font-family: "Songti SC", "STSong", Georgia, serif;
+  animation: splash-rise .6s ease-out .4s both;
 }
+.splash-dots {
+  margin-top: 28px; display: flex; gap: 7px; justify-content: center;
+  animation: splash-rise .5s ease-out .8s both;
+}
+.splash-dots i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--text2);
+  animation: splash-dot 1.2s ease-in-out infinite;
+}
+.splash-dots i:nth-child(2) { animation-delay: .18s; }
+.splash-dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes splash-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes splash-dot {
+  0%, 100% { opacity: .25; transform: translateY(0); }
+  50% { opacity: .9; transform: translateY(-4px); }
+}
+
+/* ── Daily quote banner ── */
+.daily-quote-banner {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px; padding: 10px 12px 10px 14px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface);
+  animation: splash-rise .4s ease-out both;
+}
+.daily-quote-text {
+  flex: 1; font-size: 13.5px; line-height: 1.6; color: var(--text2);
+  font-family: "Songti SC", "STSong", Georgia, serif;
+}
+.daily-quote-close {
+  flex-shrink: 0; border: none; background: none; padding: 4px;
+  font-size: 13px; color: var(--text2); opacity: .6; cursor: pointer;
+}
+.daily-quote-close:active { opacity: 1; }
 
 /* ── Auth ── */
 .auth-screen {
