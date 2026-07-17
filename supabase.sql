@@ -50,10 +50,21 @@ create table if not exists public.qsj_user_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.qsj_deletions (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  entity_type text not null check (entity_type in ('entry', 'summary', 'kanban')),
+  entity_key text not null,
+  deleted_ms bigint not null,
+  client_id text,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, entity_type, entity_key)
+);
+
 alter table public.qsj_entries enable row level security;
 alter table public.qsj_summaries enable row level security;
 alter table public.qsj_kanban_cards enable row level security;
 alter table public.qsj_user_settings enable row level security;
+alter table public.qsj_deletions enable row level security;
 
 drop policy if exists "Users can read own entries" on public.qsj_entries;
 create policy "Users can read own entries"
@@ -149,6 +160,25 @@ for update
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+drop policy if exists "Users can read own deletions" on public.qsj_deletions;
+create policy "Users can read own deletions"
+on public.qsj_deletions
+for select
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert own deletions" on public.qsj_deletions;
+create policy "Users can insert own deletions"
+on public.qsj_deletions
+for insert
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update own deletions" on public.qsj_deletions;
+create policy "Users can update own deletions"
+on public.qsj_deletions
+for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
 do $$
 begin
   alter publication supabase_realtime add table public.qsj_entries;
@@ -173,6 +203,13 @@ end $$;
 do $$
 begin
   alter publication supabase_realtime add table public.qsj_user_settings;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.qsj_deletions;
 exception
   when duplicate_object then null;
 end $$;

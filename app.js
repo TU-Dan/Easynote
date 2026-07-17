@@ -1,9 +1,16 @@
 import { generateDailySummary, generateDailyLetter, extractAllFromSummary } from './api.js'
 import { configureSync, resendSignupEmail, signInWithPassword, signUpWithPassword, signOutOfSync, getCurrentUser, pullSyncState, pushSyncState } from './supabase-sync.js'
 import { SUPABASE_CONFIG } from './supabase-config.js'
+import { renderMarkdown } from './markdown.js'
 
 // ── Storage ───────────────────────────────────────────────
-const K = { entries: 'qsj_entries', settings: 'qsj_settings', summaries: 'qsj_summaries', kanban: 'qsj_kanban' }
+const K = {
+  entries: 'qsj_entries',
+  settings: 'qsj_settings',
+  summaries: 'qsj_summaries',
+  kanban: 'qsj_kanban',
+  deletions: 'qsj_deletions'
+}
 function readJson(key, fallback) {
   return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
 }
@@ -19,7 +26,9 @@ const db = {
   getSummaries: () => readJson(K.summaries, {}),
   saveSummaries:v  => writeJson(K.summaries, v),
   getKanban:    () => readJson(K.kanban, []),
-  saveKanban:   v  => writeJson(K.kanban, v)
+  saveKanban:   v  => writeJson(K.kanban, v),
+  getDeletions: () => readJson(K.deletions, []),
+  saveDeletions:v  => writeJson(K.deletions, v)
 }
 
 function clearLocalData() {
@@ -27,6 +36,7 @@ function clearLocalData() {
   localStorage.removeItem(K.summaries)
   localStorage.removeItem(K.kanban)
   localStorage.removeItem(K.settings)
+  localStorage.removeItem(K.deletions)
 }
 
 // ── Supabase sync ─────────────────────────────────────────
@@ -46,7 +56,8 @@ function getLocalState() {
     entries: db.getEntries(),
     summaries: db.getSummaries(),
     kanban: db.getKanban(),
-    settings: syncableSettings()
+    settings: syncableSettings(),
+    deletions: db.getDeletions()
   }
 }
 
@@ -101,9 +112,48 @@ function mergeSummaries(localSummaries = {}, remoteSummaries = {}) {
   return merged
 }
 
+function deletionKey(deletion) {
+  return `${deletion.entity}:${deletion.key}`
+}
+
+function mergeDeletions(localDeletions = [], remoteDeletions = []) {
+  const merged = new Map()
+  for (const deletion of [...localDeletions, ...remoteDeletions]) {
+    const key = deletionKey(deletion)
+    const existing = merged.get(key)
+    if (!existing || deletion.deletedAt > existing.deletedAt) merged.set(key, deletion)
+  }
+  return [...merged.values()]
+}
+
+function applyDeletions(state, deletions) {
+  const deleted = new Set(deletions.map(deletionKey))
+  const summaries = Object.fromEntries(
+    Object.entries(state.summaries || {}).filter(([date]) => !deleted.has(`summary:${date}`))
+  )
+  return {
+    ...state,
+    entries: (state.entries || []).filter(item => !deleted.has(`entry:${item.id}`)),
+    summaries,
+    kanban: (state.kanban || []).filter(card => !deleted.has(`kanban:${card.id}`)),
+    deletions
+  }
+}
+
+function recordDeletions(entity, keys) {
+  if (!keys.length) return
+  const deletedAt = Date.now()
+  const next = mergeDeletions(
+    db.getDeletions(),
+    keys.map(key => ({ entity, key, deletedAt }))
+  )
+  db.saveDeletions(next)
+}
+
 function mergeState(localState, remoteState) {
   if (!remoteState) return localState
-  return {
+  const deletions = mergeDeletions(localState.deletions, remoteState.deletions)
+  return applyDeletions({
     entries: mergeById(localState.entries, remoteState.entries),
     summaries: mergeSummaries(localState.summaries, remoteState.summaries),
     kanban: dedupeKanbanCards(mergeById(localState.kanban, remoteState.kanban)),
@@ -111,7 +161,7 @@ function mergeState(localState, remoteState) {
       ...localState.settings,
       ...syncableSettings(remoteState.settings || {})
     }
-  }
+  }, deletions)
 }
 
 function replaceLocalState(nextState) {
@@ -120,6 +170,7 @@ function replaceLocalState(nextState) {
   writeJson(K.entries, nextState.entries || [])
   writeJson(K.summaries, nextState.summaries || {})
   writeJson(K.kanban, nextState.kanban || [])
+  writeJson(K.deletions, nextState.deletions || [])
   writeJson(K.settings, {
     ...localSettings,
     ...syncableSettings(nextState.settings || {}),
@@ -170,27 +221,6 @@ function textSimilarity(a, b) {
   const intersection = [...sa].filter(c => sb.has(c)).length
   return intersection / (new Set([...sa, ...sb]).size)
 }
-function md2html(text) {
-  const bold = s => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  let html = '', inList = false
-  for (const line of text.split('\n')) {
-    if (/^#{2,3}\s/.test(line)) {
-      if (inList) { html += '</ul>'; inList = false }
-      html += line.replace(/^#{2,3}\s+(.+)$/, (_, t) => `<h3>${bold(t)}</h3>`)
-    } else if (line.startsWith('- ')) {
-      if (!inList) { html += '<ul>'; inList = true }
-      html += `<li>${bold(line.slice(2))}</li>`
-    } else if (line.trim() === '') {
-      if (inList) { html += '</ul>'; inList = false }
-    } else {
-      if (inList) { html += '</ul>'; inList = false }
-      if (line.trim()) html += `<p>${bold(line)}</p>`
-    }
-  }
-  if (inList) html += '</ul>'
-  return html
-}
-
 // ── Toast ─────────────────────────────────────────────────
 let toastTimer = null
 function toast(msg, ms = 2200) {
@@ -293,6 +323,11 @@ function saveEntry() {
 function deleteEntry(id) {
   if (!id) return
   expandedRecentEntries.delete(id)
+  const deletedCardIds = db.getKanban()
+    .filter(c => c.source === 'record' && c.sourceEntryId === id)
+    .map(c => c.id)
+  recordDeletions('entry', [id])
+  recordDeletions('kanban', deletedCardIds)
   db.saveEntries(db.getEntries().filter(e => e.id !== id))
   const entryIds = new Set(db.getEntries().map(e => e.id))
   db.saveKanban(db.getKanban().filter(c => c.source !== 'record' || !c.sourceEntryId || entryIds.has(c.sourceEntryId)))
@@ -418,7 +453,7 @@ function renderTodaySummaryArea() {
     entries.length ? `今日已记录 ${entries.length} 条` : '今天还没有记录'
 
   if (saved) {
-    document.getElementById('today-summary-preview').innerHTML = md2html(saved.text)
+    document.getElementById('today-summary-preview').innerHTML = renderMarkdown(saved.text)
     document.getElementById('today-summary-text').value = saved.text
     showSummaryPreview()
   }
@@ -477,7 +512,7 @@ async function handleGenerateSummary(options = {}) {
     summaryStreamingText = ''
     document.getElementById('today-summary-loading').hidden = true
     document.getElementById('today-summary-result').hidden  = false
-    document.getElementById('today-summary-preview').innerHTML = md2html(text)
+    document.getElementById('today-summary-preview').innerHTML = renderMarkdown(text)
     document.getElementById('today-summary-text').value = text
     showSummaryPreview()
     addSummaryTextToKanban(text, { silent: true, stay: true })
@@ -569,7 +604,7 @@ function openLetter(date) {
   detail.style.opacity = ''
   detail.scrollTop = 0
   document.getElementById('archive-letter-date').textContent = formatLetterDate(date)
-  document.getElementById('archive-letter-body').innerHTML = md2html(s.letter || '')
+  document.getElementById('archive-letter-body').innerHTML = renderMarkdown(s.letter || '')
   document.getElementById('archive-reflection').value = s.reflection || ''
   setFavButton(!!s.favorite)
 }
@@ -716,7 +751,7 @@ function renderStreamingSummary(text) {
   const preview = document.getElementById('today-summary-stream')
   if (!preview) return
   preview.hidden = !text.trim()
-  preview.innerHTML = text.trim() ? md2html(text) : ''
+  preview.innerHTML = text.trim() ? renderMarkdown(text) : ''
 }
 
 function setSummaryProgress(value) {
@@ -983,6 +1018,7 @@ function renderKanban() {
   // Delete button (revealed by swipe)
   list.querySelectorAll('.js-k-del').forEach(btn =>
     btn.addEventListener('click', () => {
+      recordDeletions('kanban', [btn.dataset.id])
       db.saveKanban(db.getKanban().filter(c => c.id !== btn.dataset.id))
       renderKanban()
     })
@@ -1594,7 +1630,7 @@ function init() {
       const today = todayKey()
       const s = db.getSummaries()
       if (s[today]) { s[today].text = text; db.saveSummaries(s) }
-      document.getElementById('today-summary-preview').innerHTML = md2html(text)
+      document.getElementById('today-summary-preview').innerHTML = renderMarkdown(text)
       addSummaryTextToKanban(text, { silent: true, stay: true })
       toast('整理已更新 ✓')
       showSummaryPreview()
@@ -1669,7 +1705,9 @@ function init() {
 
   // Kanban clear done
   document.getElementById('kanban-clear-done-btn').addEventListener('click', () => {
-    db.saveKanban(db.getKanban().filter(c => !c.done))
+    const cards = db.getKanban()
+    recordDeletions('kanban', cards.filter(c => c.done).map(c => c.id))
+    db.saveKanban(cards.filter(c => !c.done))
     renderKanban()
   })
 

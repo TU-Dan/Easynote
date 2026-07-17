@@ -5,7 +5,8 @@ const TABLES = {
   entries: 'qsj_entries',
   summaries: 'qsj_summaries',
   kanban: 'qsj_kanban_cards',
-  settings: 'qsj_user_settings'
+  settings: 'qsj_user_settings',
+  deletions: 'qsj_deletions'
 }
 
 let client = null
@@ -121,6 +122,25 @@ function fromSettings(settings = {}) {
   }
 }
 
+function toDeletion(row) {
+  return {
+    entity: row.entity_type,
+    key: row.entity_key,
+    deletedAt: row.deleted_ms
+  }
+}
+
+function fromDeletion(deletion) {
+  return {
+    user_id: currentUser.id,
+    entity_type: deletion.entity,
+    entity_key: deletion.key,
+    deleted_ms: deletion.deletedAt,
+    client_id: INSTANCE_ID,
+    updated_at: new Date().toISOString()
+  }
+}
+
 export async function configureSync({ url, anonKey, onStatus, onRemoteState }) {
   handlers = {
     status: onStatus || (() => {}),
@@ -201,14 +221,15 @@ export async function pullSyncState() {
   if (!currentUser) return null
   const supabase = requireClient()
 
-  const [entriesRes, summariesRes, kanbanRes, settingsRes] = await Promise.all([
+  const [entriesRes, summariesRes, kanbanRes, settingsRes, deletionsRes] = await Promise.all([
     supabase.from(TABLES.entries).select('id, content, timestamp_ms, entry_date').order('timestamp_ms'),
     supabase.from(TABLES.summaries).select('summary_date, text, updated_ms, updated_at, reflection, letter, favorite'),
     supabase.from(TABLES.kanban).select('id, text, card_type, done, card_date, sort_order').order('sort_order'),
-    supabase.from(TABLES.settings).select('api_key, base_url').maybeSingle()
+    supabase.from(TABLES.settings).select('api_key, base_url').maybeSingle(),
+    supabase.from(TABLES.deletions).select('entity_type, entity_key, deleted_ms')
   ])
 
-  for (const res of [entriesRes, summariesRes, kanbanRes, settingsRes]) {
+  for (const res of [entriesRes, summariesRes, kanbanRes, settingsRes, deletionsRes]) {
     if (res.error) throw res.error
   }
 
@@ -219,7 +240,8 @@ export async function pullSyncState() {
     settings: {
       apiKey: settingsRes.data?.api_key || '',
       baseUrl: settingsRes.data?.base_url || ''
-    }
+    },
+    deletions: deletionsRes.data.map(toDeletion)
   }
 }
 
@@ -231,10 +253,7 @@ export async function pushSyncState(state) {
   const entries = state.entries || []
   const summaries = Object.entries(state.summaries || {})
   const kanban = state.kanban || []
-
-  const nextEntryIds = entries.map(item => item.id)
-  const nextSummaryDates = summaries.map(([date]) => date)
-  const nextKanbanIds = kanban.map(card => card.id)
+  const deletions = state.deletions || []
 
   const upserts = []
   if (entries.length) upserts.push(supabase.from(TABLES.entries).upsert(entries.map(fromEntry)))
@@ -246,6 +265,11 @@ export async function pushSyncState(state) {
     )
   }
   if (kanban.length) upserts.push(supabase.from(TABLES.kanban).upsert(kanban.map(fromKanbanCard)))
+  if (deletions.length) {
+    upserts.push(
+      supabase.from(TABLES.deletions).upsert(deletions.map(fromDeletion), { onConflict: 'user_id,entity_type,entity_key' })
+    )
+  }
   upserts.push(supabase.from(TABLES.settings).upsert(fromSettings(state.settings || {})))
 
   const upsertResults = await Promise.all(upserts)
@@ -253,19 +277,7 @@ export async function pushSyncState(state) {
     if (res.error) throw res.error
   }
 
-  await deleteMissingRows(TABLES.entries, 'id', nextEntryIds)
-  await deleteMissingRows(TABLES.summaries, 'summary_date', nextSummaryDates)
-  await deleteMissingRows(TABLES.kanban, 'id', nextKanbanIds)
-
   setStatus(`已同步：${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`)
-}
-
-async function deleteMissingRows(table, column, keepValues) {
-  const supabase = requireClient()
-  let query = supabase.from(table).delete().eq('user_id', currentUser.id)
-  query = keepValues.length ? query.not(column, 'in', `(${keepValues.map(v => `"${v}"`).join(',')})`) : query.not(column, 'is', null)
-  const { error } = await query
-  if (error) throw error
 }
 
 async function subscribeRemoteChanges() {
