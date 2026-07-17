@@ -2,42 +2,13 @@ import { generateDailySummary, generateDailyLetter, extractAllFromSummary } from
 import { configureSync, resendSignupEmail, signInWithPassword, signUpWithPassword, signOutOfSync, getCurrentUser, pullSyncState, pushSyncState } from './supabase-sync.js'
 import { SUPABASE_CONFIG } from './supabase-config.js'
 import { renderMarkdown } from './markdown.js'
+import { createStorage } from './storage.js'
+import { validateAiSettings, isCustomAiEndpoint, normalizeAiBaseUrl } from './ai-settings.js'
+import { dedupeKanbanCards, kanbanSemanticKey, normalizeKanbanText, textSimilarity } from './kanban-model.js'
+import { mergeDeletions, mergeSyncState } from './sync-state.js'
 
 // ── Storage ───────────────────────────────────────────────
-const K = {
-  entries: 'qsj_entries',
-  settings: 'qsj_settings',
-  summaries: 'qsj_summaries',
-  kanban: 'qsj_kanban',
-  deletions: 'qsj_deletions'
-}
-function readJson(key, fallback) {
-  return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
-}
-function writeJson(key, value) {
-  localStorage.setItem(key, JSON.stringify(value))
-  queueSync()
-}
-const db = {
-  getEntries:   () => readJson(K.entries, []),
-  saveEntries:  v  => writeJson(K.entries, v),
-  getSettings:  () => readJson(K.settings, {}),
-  saveSettings: v  => writeJson(K.settings, v),
-  getSummaries: () => readJson(K.summaries, {}),
-  saveSummaries:v  => writeJson(K.summaries, v),
-  getKanban:    () => readJson(K.kanban, []),
-  saveKanban:   v  => writeJson(K.kanban, v),
-  getDeletions: () => readJson(K.deletions, []),
-  saveDeletions:v  => writeJson(K.deletions, v)
-}
-
-function clearLocalData() {
-  localStorage.removeItem(K.entries)
-  localStorage.removeItem(K.summaries)
-  localStorage.removeItem(K.kanban)
-  localStorage.removeItem(K.settings)
-  localStorage.removeItem(K.deletions)
-}
+const db = createStorage({ persistent: localStorage, session: sessionStorage, onChange: queueSync })
 
 // ── Supabase sync ─────────────────────────────────────────
 let syncReady = false
@@ -61,85 +32,6 @@ function getLocalState() {
   }
 }
 
-function mergeById(localItems, remoteItems) {
-  const merged = new Map()
-  for (const item of localItems || []) merged.set(item.id, item)
-  for (const item of remoteItems || []) merged.set(item.id, { ...merged.get(item.id), ...item })
-  return [...merged.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
-}
-
-function normalizeKanbanText(text = '') {
-  return text
-    .replace(/\*\*/g, '')
-    .replace(/[，。！？、；：,.!?;:()[\]（）【】"'“”‘’]/g, '')
-    .replace(/\s+/g, '')
-    .trim()
-    .toLowerCase()
-}
-
-function kanbanSemanticKey(card) {
-  return [
-    card.date || '',
-    card.type || '',
-    card.done ? 'done' : 'open',
-    normalizeKanbanText(card.text)
-  ].join('|')
-}
-
-function dedupeKanbanCards(cards = []) {
-  const byKey = new Map()
-  for (const card of cards) {
-    const key = kanbanSemanticKey(card)
-    const existing = byKey.get(key)
-    if (!existing) {
-      byKey.set(key, card)
-      continue
-    }
-
-    const existingScore = (existing.source === 'summary' ? 2 : 1) + (existing.id ? 1 : 0)
-    const cardScore = (card.source === 'summary' ? 2 : 1) + (card.id ? 1 : 0)
-    if (cardScore > existingScore) byKey.set(key, { ...existing, ...card })
-  }
-  return [...byKey.values()]
-}
-
-function mergeSummaries(localSummaries = {}, remoteSummaries = {}) {
-  const merged = { ...localSummaries }
-  for (const [date, remote] of Object.entries(remoteSummaries)) {
-    const local = merged[date]
-    if (!local || (remote?.ts || 0) >= (local?.ts || 0)) merged[date] = remote
-  }
-  return merged
-}
-
-function deletionKey(deletion) {
-  return `${deletion.entity}:${deletion.key}`
-}
-
-function mergeDeletions(localDeletions = [], remoteDeletions = []) {
-  const merged = new Map()
-  for (const deletion of [...localDeletions, ...remoteDeletions]) {
-    const key = deletionKey(deletion)
-    const existing = merged.get(key)
-    if (!existing || deletion.deletedAt > existing.deletedAt) merged.set(key, deletion)
-  }
-  return [...merged.values()]
-}
-
-function applyDeletions(state, deletions) {
-  const deleted = new Set(deletions.map(deletionKey))
-  const summaries = Object.fromEntries(
-    Object.entries(state.summaries || {}).filter(([date]) => !deleted.has(`summary:${date}`))
-  )
-  return {
-    ...state,
-    entries: (state.entries || []).filter(item => !deleted.has(`entry:${item.id}`)),
-    summaries,
-    kanban: (state.kanban || []).filter(card => !deleted.has(`kanban:${card.id}`)),
-    deletions
-  }
-}
-
 function recordDeletions(entity, keys) {
   if (!keys.length) return
   const deletedAt = Date.now()
@@ -150,28 +42,14 @@ function recordDeletions(entity, keys) {
   db.saveDeletions(next)
 }
 
-function mergeState(localState, remoteState) {
-  if (!remoteState) return localState
-  const deletions = mergeDeletions(localState.deletions, remoteState.deletions)
-  return applyDeletions({
-    entries: mergeById(localState.entries, remoteState.entries),
-    summaries: mergeSummaries(localState.summaries, remoteState.summaries),
-    kanban: dedupeKanbanCards(mergeById(localState.kanban, remoteState.kanban)),
-    settings: {
-      ...localState.settings,
-      ...syncableSettings(remoteState.settings || {})
-    }
-  }, deletions)
-}
-
 function replaceLocalState(nextState) {
   const localSettings = db.getSettings()
 
-  writeJson(K.entries, nextState.entries || [])
-  writeJson(K.summaries, nextState.summaries || {})
-  writeJson(K.kanban, nextState.kanban || [])
-  writeJson(K.deletions, nextState.deletions || [])
-  writeJson(K.settings, {
+  db.saveEntries(nextState.entries || [])
+  db.saveSummaries(nextState.summaries || {})
+  db.saveKanban(nextState.kanban || [])
+  db.saveDeletions(nextState.deletions || [])
+  db.saveSettings({
     ...localSettings,
     ...syncableSettings(nextState.settings || {}),
     syncEmail: localSettings.syncEmail || ''
@@ -181,7 +59,7 @@ function replaceLocalState(nextState) {
 function applyRemoteState(remoteState) {
   if (!remoteState || !syncReady) return
   applyingRemoteState = true
-  replaceLocalState(mergeState(getLocalState(), remoteState))
+  replaceLocalState(mergeSyncState(getLocalState(), remoteState))
   applyingRemoteState = false
   renderAll()
 }
@@ -214,13 +92,6 @@ function todayLabel() {
 }
 function fmtTime(ts) { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}` }
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
-function textSimilarity(a, b) {
-  const cjk = s => [...s].filter(c => c >= '一' && c <= '鿿')
-  const sa = new Set(cjk(a)), sb = new Set(cjk(b))
-  if (!sa.size || !sb.size) return 0
-  const intersection = [...sa].filter(c => sb.has(c)).length
-  return intersection / (new Set([...sa, ...sb]).size)
-}
 // ── Toast ─────────────────────────────────────────────────
 let toastTimer = null
 function toast(msg, ms = 2200) {
@@ -1323,20 +1194,37 @@ function openSettings() {
   const user = getCurrentUser()
   document.getElementById('setting-api-key').value  = s.apiKey  || ''
   document.getElementById('setting-base-url').value = s.baseUrl || ''
+  document.getElementById('setting-custom-endpoint-approved').checked = false
+  updateCustomEndpointWarning()
   document.getElementById('account-email').textContent = user?.email ? `当前账号：${user.email}` : '未登录'
   document.getElementById('settings-modal').hidden       = false
 }
 function closeSettings() { document.getElementById('settings-modal').hidden = true }
 async function saveSettingsForm() {
-  const prev = db.getSettings()
-  db.saveSettings({
-    ...prev,
-    apiKey:  document.getElementById('setting-api-key').value.trim(),
-    baseUrl: document.getElementById('setting-base-url').value.trim()
-  })
+  const apiKey = document.getElementById('setting-api-key').value.trim()
+  const approval = document.getElementById('setting-custom-endpoint-approved').checked
+  let baseUrl
+  try {
+    baseUrl = normalizeAiBaseUrl(document.getElementById('setting-base-url').value)
+    const approvedBaseUrl = isCustomAiEndpoint(baseUrl) && approval ? baseUrl : ''
+    if (apiKey) validateAiSettings({ apiKey, baseUrl, approvedBaseUrl })
+    db.saveSettings({ ...db.getSettings(), apiKey, baseUrl, approvedBaseUrl })
+  } catch (err) {
+    toast(err.message, 4000)
+    return
+  }
   queueSync(100)
   closeSettings()
   toast('设置已保存')
+}
+
+function updateCustomEndpointWarning() {
+  const warning = document.getElementById('custom-endpoint-warning')
+  try {
+    warning.hidden = !isCustomAiEndpoint(document.getElementById('setting-base-url').value)
+  } catch {
+    warning.hidden = true
+  }
 }
 
 async function initAuth() {
@@ -1365,7 +1253,7 @@ async function initAuth() {
 async function enterApp() {
   const localState = getLocalState()
   const remoteState = await pullSyncState()
-  const nextState = mergeState(localState, remoteState)
+  const nextState = mergeSyncState(localState, remoteState)
 
   syncReady = true
   applyingRemoteState = true
@@ -1522,7 +1410,7 @@ async function handleSignOut() {
     localDevMode = false
     syncReady = false
     await signOutOfSync()
-    clearLocalData()
+    db.clearAll()
     renderAll()
     closeSettings()
     showAuthScreen('已退出账号')
@@ -1716,6 +1604,10 @@ function init() {
   document.getElementById('close-settings-btn').addEventListener('click', closeSettings)
   document.getElementById('modal-backdrop').addEventListener('click', closeSettings)
   document.getElementById('save-settings-btn').addEventListener('click', saveSettingsForm)
+  document.getElementById('setting-base-url').addEventListener('input', () => {
+    document.getElementById('setting-custom-endpoint-approved').checked = false
+    updateCustomEndpointWarning()
+  })
   document.getElementById('sign-out-btn').addEventListener('click', handleSignOut)
 
   document.getElementById('today-summary-text').addEventListener('input', e => {

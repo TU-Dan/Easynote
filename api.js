@@ -1,5 +1,8 @@
+import { validateAiSettings } from './ai-settings.js'
+
 async function callDeepSeek(messages, settings, options = {}) {
-  const base = (settings.baseUrl || 'https://api.deepseek.com').replace(/\/$/, '')
+  const safeSettings = validateAiSettings(settings)
+  const base = safeSettings.baseUrl
   const controller = options.controller || new AbortController()
   let timedOut = false
 
@@ -16,10 +19,10 @@ async function callDeepSeek(messages, settings, options = {}) {
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settings.apiKey}`
+        'Authorization': `Bearer ${safeSettings.apiKey}`
       },
       body: JSON.stringify({
-        model: settings.model || 'deepseek-chat',
+        model: safeSettings.model || 'deepseek-chat',
         messages,
         temperature: 0.2,
         max_tokens: 1800,
