@@ -29,7 +29,7 @@ export function validateAiSettings(settings = {}) {
   const baseUrl = normalizeAiBaseUrl(settings.baseUrl)
   if (!apiKey) throw new Error('请输入 DeepSeek API Key')
   if (isCustomAiEndpoint(baseUrl) && settings.approvedBaseUrl !== baseUrl) {
-    throw new Error('请确认允许把 API Key 发送到这个自定义地址')
+    throw new Error('请确认你信任这个服务地址')
   }
   return { ...settings, apiKey, baseUrl }
 }

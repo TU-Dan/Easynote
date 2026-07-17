@@ -236,20 +236,23 @@
           <button id="close-settings-btn" class="icon-btn close-btn">✕</button>
         </div>
         <div class="settings-body">
-          <p class="settings-section-label">AI 接口</p>
+          <p class="settings-section-label">AI 助手</p>
           <div class="form-group">
-            <label>DeepSeek API Key</label>
-            <input type="password" id="setting-api-key" placeholder="sk-..." autocomplete="off">
-            <p class="form-hint">密钥仅保留在当前浏览器会话，并通过你的账号同步；退出账号会立即清除本地副本。</p>
+            <label for="setting-api-key">DeepSeek 密钥</label>
+            <input type="password" id="setting-api-key" placeholder="粘贴 sk- 开头的密钥" autocomplete="off">
+            <p class="form-hint">用于生成每日总结和信件。退出账号后，这台设备不会保留密钥。</p>
           </div>
-          <div class="form-group">
-            <label>API Base URL <span class="label-hint">（可改为代理地址）</span></label>
-            <input type="url" id="setting-base-url" placeholder="https://api.deepseek.com">
+          <button id="advanced-settings-toggle" class="advanced-settings-toggle" type="button" aria-expanded="false">高级设置</button>
+          <div id="advanced-settings" hidden>
+            <div class="form-group">
+              <label for="setting-base-url">服务地址 <span class="label-hint">（一般不用修改）</span></label>
+              <input type="url" id="setting-base-url" placeholder="https://api.deepseek.com">
+            </div>
+            <label id="custom-endpoint-warning" class="endpoint-warning" hidden>
+              <input id="setting-custom-endpoint-approved" type="checkbox">
+              <span>这不是 DeepSeek 官方地址。仅在你信任这个地址时继续。</span>
+            </label>
           </div>
-          <label id="custom-endpoint-warning" class="endpoint-warning" hidden>
-            <input id="setting-custom-endpoint-approved" type="checkbox">
-            <span>我确认把 API Key 和记录内容发送到这个自定义地址。</span>
-          </label>
 
           <p class="settings-section-label">账号</p>
           <p id="account-email" class="account-email"></p>

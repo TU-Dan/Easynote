@@ -1196,6 +1196,9 @@ function openSettings() {
   document.getElementById('setting-base-url').value = s.baseUrl || ''
   document.getElementById('setting-custom-endpoint-approved').checked = false
   updateCustomEndpointWarning()
+  let showAdvanced = false
+  try { showAdvanced = isCustomAiEndpoint(s.baseUrl) } catch { showAdvanced = true }
+  setAdvancedSettingsVisible(showAdvanced)
   document.getElementById('account-email').textContent = user?.email ? `当前账号：${user.email}` : '未登录'
   document.getElementById('settings-modal').hidden       = false
 }
@@ -1225,6 +1228,11 @@ function updateCustomEndpointWarning() {
   } catch {
     warning.hidden = true
   }
+}
+
+function setAdvancedSettingsVisible(visible) {
+  document.getElementById('advanced-settings').hidden = !visible
+  document.getElementById('advanced-settings-toggle').setAttribute('aria-expanded', String(visible))
 }
 
 async function initAuth() {
@@ -1604,6 +1612,9 @@ function init() {
   document.getElementById('close-settings-btn').addEventListener('click', closeSettings)
   document.getElementById('modal-backdrop').addEventListener('click', closeSettings)
   document.getElementById('save-settings-btn').addEventListener('click', saveSettingsForm)
+  document.getElementById('advanced-settings-toggle').addEventListener('click', e => {
+    setAdvancedSettingsVisible(e.currentTarget.getAttribute('aria-expanded') !== 'true')
+  })
   document.getElementById('setting-base-url').addEventListener('input', () => {
     document.getElementById('setting-custom-endpoint-approved').checked = false
     updateCustomEndpointWarning()
