@@ -167,6 +167,6 @@ cp .env.example .env
 ---
 
 ## 样例实例(EasyNote / 轻松记)
-- 域名 `easynote.brainpowerai.com.cn:8443`，服务器 上海 Lighthouse 4核4GB。
+- 正式域名 `easynote.brainpowerai.com.cn`（标准 HTTPS 443；8443 暂留作旧 PWA 过渡），服务器上海 Lighthouse 4核4GB。
 - 表：`qsj_entries / qsj_summaries / qsj_kanban_cards / qsj_user_settings`，均 RLS。
 - 备份：`~/backups/` 每天 03:30 + (待接)COS。

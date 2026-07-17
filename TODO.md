@@ -12,11 +12,11 @@
 - #17 + #18 Today organize no longer resurfaces old/completed kanban items
 - Security hardening — static-only Service Worker cache, escaped Markdown, explicit sync tombstones
 - Reliability — safe local-data recovery, tested sync/kanban/storage modules, accessible dialogs and forms
+- #13 switched production HTTPS from interim port 8443 to standard 443 (8443 retained temporarily for old PWA clients)
 
 **Pending:**
 - #11 server-side scheduled daily letter at 23:00 CST (after deploy/filing)
 - **#12 automatic database backup — HIGH PRIORITY (data is still single-copy on the server, no backup yet)**
-- #13 switch interim HTTPS:8443 to standard 443 (after ICP filing clears)
 - #14 security cleanup (reset the cloud DB password exposed during migration; least-privilege CAM key for acme.sh)
 - #15 research: voice-to-text vs rely on keyboard dictation
 
