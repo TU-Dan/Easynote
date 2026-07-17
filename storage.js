@@ -4,33 +4,43 @@ const KEYS = {
   summaries: 'qsj_summaries',
   kanban: 'qsj_kanban',
   deletions: 'qsj_deletions',
-  apiKey: 'qsj_api_key'
+  apiKey: 'qsj_api_key',
+  schemaVersion: 'qsj_schema_version'
 }
+
+const SCHEMA_VERSION = 1
 
 function cloneFallback(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
-function safeRead(storage, key, fallback) {
+function safeRead(storage, key, fallback, onRecover) {
   const raw = storage.getItem(key)
   if (raw === null) return cloneFallback(fallback)
 
   try {
     return JSON.parse(raw)
   } catch {
+    const backupKey = `${key}_corrupt_${Date.now()}`
+    try { storage.setItem(backupKey, raw) } catch { /* storage may be full */ }
     storage.removeItem(key)
+    onRecover({ key, backupKey })
     return cloneFallback(fallback)
   }
 }
 
 export function createStorage({ persistent, session, onChange = () => {} }) {
+  const recoveries = []
+  const onRecover = recovery => recoveries.push(recovery)
+  try { persistent.setItem(KEYS.schemaVersion, String(SCHEMA_VERSION)) } catch { /* storage may be unavailable */ }
+
   function write(key, value) {
     persistent.setItem(key, JSON.stringify(value))
     onChange()
   }
 
   function getSettings() {
-    const stored = safeRead(persistent, KEYS.settings, {})
+    const stored = safeRead(persistent, KEYS.settings, {}, onRecover)
     let apiKey = session.getItem(KEYS.apiKey) || ''
 
     // One-time migration: remove legacy API keys from persistent browser storage.
@@ -54,18 +64,23 @@ export function createStorage({ persistent, session, onChange = () => {} }) {
   }
 
   return {
-    getEntries: () => safeRead(persistent, KEYS.entries, []),
+    getEntries: () => safeRead(persistent, KEYS.entries, [], onRecover),
     saveEntries: value => write(KEYS.entries, value),
     getSettings,
     saveSettings,
-    getSummaries: () => safeRead(persistent, KEYS.summaries, {}),
+    getSummaries: () => safeRead(persistent, KEYS.summaries, {}, onRecover),
     saveSummaries: value => write(KEYS.summaries, value),
-    getKanban: () => safeRead(persistent, KEYS.kanban, []),
+    getKanban: () => safeRead(persistent, KEYS.kanban, [], onRecover),
     saveKanban: value => write(KEYS.kanban, value),
-    getDeletions: () => safeRead(persistent, KEYS.deletions, []),
+    getDeletions: () => safeRead(persistent, KEYS.deletions, [], onRecover),
     saveDeletions: value => write(KEYS.deletions, value),
+    consumeRecoveries() {
+      return recoveries.splice(0)
+    },
     clearAll() {
-      Object.values(KEYS).forEach(key => persistent.removeItem(key))
+      Object.entries(KEYS)
+        .filter(([name]) => name !== 'schemaVersion')
+        .forEach(([, key]) => persistent.removeItem(key))
       session.removeItem(KEYS.apiKey)
     }
   }

@@ -1,6 +1,6 @@
 # Project TODOs
 
-## Status (updated 2026-06-07)
+## Status (updated 2026-07-17)
 
 **Done & deployed:**
 - Batch 1 — #1 kanban shows ☐/☑ records without summary + rolling 7-day; #2 keyboard collapses on save; #3 records compact/timestamped/expandable/swipe-delete
@@ -8,10 +8,12 @@
 - Batch 3 — #7 letter archive (信箱); #8 elegant "warm stationery" letter view; #9 share letter (native share / clipboard, letter text + date only); #10 swipe-right to go back
 - Bug fix — kanban: completed cards could not be un-checked (record re-materialized them); fixed
 - Letter length shortened (2-3 short paragraphs, 150-280 chars)
+- #16 launch splash removes login-screen flash
+- #17 + #18 Today organize no longer resurfaces old/completed kanban items
+- Security hardening — static-only Service Worker cache, escaped Markdown, explicit sync tombstones
+- Reliability — safe local-data recovery, tested sync/kanban/storage modules, accessible dialogs and forms
 
 **Pending:**
-- #16 fix login-screen flash on launch (show splash / "每日一句话" instead)
-- #17 + #18 fix Today-organize resurfacing old / completed kanban items (drop kanban context from prompt + exact dedup on insert)
 - #11 server-side scheduled daily letter at 23:00 CST (after deploy/filing)
 - **#12 automatic database backup — HIGH PRIORITY (data is still single-copy on the server, no backup yet)**
 - #13 switch interim HTTPS:8443 to standard 443 (after ICP filing clears)

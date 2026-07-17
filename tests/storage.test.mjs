@@ -40,4 +40,8 @@ test('recovers from malformed local JSON', () => {
 
   assert.deepEqual(storage.getEntries(), [])
   assert.equal(persistent.dump().qsj_entries, undefined)
+  const recoveries = storage.consumeRecoveries()
+  assert.equal(recoveries.length, 1)
+  assert.equal(recoveries[0].key, 'qsj_entries')
+  assert.equal(persistent.dump()[recoveries[0].backupKey], '{broken')
 })

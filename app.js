@@ -126,14 +126,21 @@ let summaryStreamingText = ''
 let summaryAutoAttemptKey = ''
 let kanbanSearch = ''
 const expandedRecentEntries = new Set()
+let settingsReturnFocus = null
+let calendarReturnFocus = null
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tab) {
   activeTab = tab
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'))
-  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'))
+  document.querySelectorAll('.nav-btn').forEach(el => {
+    el.classList.remove('active')
+    el.removeAttribute('aria-current')
+  })
   document.getElementById(`tab-${tab}`).classList.add('active')
-  document.querySelector(`.nav-btn[data-tab="${tab}"]`).classList.add('active')
+  const activeNav = document.querySelector(`.nav-btn[data-tab="${tab}"]`)
+  activeNav.classList.add('active')
+  activeNav.setAttribute('aria-current', 'page')
   if (tab === 'today')  { renderToday(); maybeAutoOrganizeToday() }
   if (tab === 'kanban') renderKanban()
   if (tab === 'archive') renderArchive()
@@ -628,7 +635,9 @@ function renderStreamingSummary(text) {
 function setSummaryProgress(value) {
   summaryProgress = Math.max(0, Math.min(100, Math.round(value)))
   document.getElementById('today-summary-progress-text').textContent = `${summaryProgress}%`
-  document.getElementById('today-summary-progress-bar').style.width = `${summaryProgress}%`
+  const progressBar = document.getElementById('today-summary-progress-bar')
+  progressBar.style.width = `${summaryProgress}%`
+  progressBar.setAttribute('aria-valuenow', String(summaryProgress))
   document.getElementById('today-nav-progress').textContent = `${summaryProgress}%`
 }
 
@@ -1085,6 +1094,7 @@ function updateOtherBtnLabel() {
 }
 
 function openCalendar() {
+  calendarReturnFocus = document.activeElement
   calYear  = new Date().getFullYear()
   calMonth = new Date().getMonth()
   // Initialise temp selection from committed range
@@ -1092,10 +1102,13 @@ function openCalendar() {
   calEnd   = kanbanDateTo   || null
   renderCalendar()
   document.getElementById('cal-overlay').hidden = false
+  document.getElementById('cal-close').focus()
 }
 
 function closeCalendar() {
   document.getElementById('cal-overlay').hidden = true
+  calendarReturnFocus?.focus()
+  calendarReturnFocus = null
 }
 
 function cancelCalendar() {
@@ -1141,7 +1154,7 @@ function renderCalendar() {
   const rangeE = calStart && calEnd ? (calStart <= calEnd ? calEnd : calStart) : calStart
 
   let html = ''
-  for (let i = 0; i < firstDow; i++) html += '<button class="cal-day empty"></button>'
+  for (let i = 0; i < firstDow; i++) html += '<button class="cal-day empty" type="button" tabindex="-1" aria-hidden="true"></button>'
 
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${calYear}-${pad(calMonth + 1)}-${pad(d)}`
@@ -1152,7 +1165,7 @@ function renderCalendar() {
       else if (ds === rangeE)             cls += ' range-end in-range'
       else if (ds > rangeS && ds < rangeE) cls += ' in-range'
     } else if (rangeS && ds === rangeS)  cls += ' selected'
-    html += `<button class="${cls}" data-date="${ds}">${d}</button>`
+    html += `<button class="${cls}" type="button" data-date="${ds}" aria-label="${ds}">${d}</button>`
   }
 
   grid.innerHTML = html
@@ -1190,6 +1203,7 @@ function showSummaryEdit() {
 
 // ── Settings ──────────────────────────────────────────────
 function openSettings() {
+  settingsReturnFocus = document.activeElement
   const s = db.getSettings()
   const user = getCurrentUser()
   document.getElementById('setting-api-key').value  = s.apiKey  || ''
@@ -1201,8 +1215,13 @@ function openSettings() {
   setAdvancedSettingsVisible(showAdvanced)
   document.getElementById('account-email').textContent = user?.email ? `当前账号：${user.email}` : '未登录'
   document.getElementById('settings-modal').hidden       = false
+  document.getElementById('close-settings-btn').focus()
 }
-function closeSettings() { document.getElementById('settings-modal').hidden = true }
+function closeSettings() {
+  document.getElementById('settings-modal').hidden = true
+  settingsReturnFocus?.focus()
+  settingsReturnFocus = null
+}
 async function saveSettingsForm() {
   const apiKey = document.getElementById('setting-api-key').value.trim()
   const approval = document.getElementById('setting-custom-endpoint-approved').checked
@@ -1432,12 +1451,46 @@ function renderAll() {
   if (activeTab === 'today') renderToday()
   if (activeTab === 'kanban') renderKanban()
   if (activeTab === 'archive' && !archiveOpenDate) renderArchive()
+  if (db.consumeRecoveries().length) {
+    toast('检测到损坏的本地数据，已安全隔离并继续启动', 4000)
+  }
+}
+
+function handleDialogKeyboard(e) {
+  const dialog = !document.getElementById('settings-modal').hidden
+    ? document.getElementById('settings-modal')
+    : !document.getElementById('cal-overlay').hidden
+      ? document.getElementById('cal-overlay')
+      : null
+  if (!dialog) return
+
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    if (dialog.id === 'settings-modal') closeSettings()
+    else cancelCalendar()
+    return
+  }
+  if (e.key !== 'Tab') return
+
+  const focusable = [...dialog.querySelectorAll('button:not([hidden]):not([disabled]), input:not([hidden]):not([disabled]), textarea:not([hidden]):not([disabled])')]
+    .filter(element => element.offsetParent !== null)
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault()
+    first.focus()
+  }
 }
 
 
 // ── Init ──────────────────────────────────────────────────
 function init() {
   showDailyQuote()
+  document.addEventListener('keydown', handleDialogKeyboard)
   document.getElementById('daily-quote-close').addEventListener('click', dismissDailyQuote)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker
