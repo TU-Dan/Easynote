@@ -1,4 +1,5 @@
 export const DEFAULT_AI_BASE_URL = 'https://api.deepseek.com'
+export const DEFAULT_AI_MODEL = 'deepseek-v4-flash'
 
 export function normalizeAiBaseUrl(value = '') {
   const raw = value.trim() || DEFAULT_AI_BASE_URL

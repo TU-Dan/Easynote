@@ -1,4 +1,4 @@
-import { validateAiSettings } from './ai-settings.js'
+import { DEFAULT_AI_BASE_URL, DEFAULT_AI_MODEL, validateAiSettings } from './ai-settings.js'
 
 async function callDeepSeek(messages, settings, options = {}) {
   const safeSettings = validateAiSettings(settings)
@@ -14,6 +14,20 @@ async function callDeepSeek(messages, settings, options = {}) {
 
   let res
   try {
+    const model = safeSettings.model || DEFAULT_AI_MODEL
+    const body = {
+      model,
+      messages,
+      temperature: 0.2,
+      max_tokens: 1800,
+      stream: true
+    }
+    // The retired deepseek-chat alias used non-thinking mode. Preserve that
+    // quick-summary behavior with the current V4 model.
+    if (!safeSettings.model && base === DEFAULT_AI_BASE_URL && model === DEFAULT_AI_MODEL) {
+      body.thinking = { type: 'disabled' }
+    }
+
     res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       signal: controller.signal,
@@ -21,13 +35,7 @@ async function callDeepSeek(messages, settings, options = {}) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${safeSettings.apiKey}`
       },
-      body: JSON.stringify({
-        model: safeSettings.model || 'deepseek-chat',
-        messages,
-        temperature: 0.2,
-        max_tokens: 1800,
-        stream: true
-      })
+      body: JSON.stringify(body)
     })
   } catch (err) {
     clearTimeout(timeout)
@@ -39,8 +47,10 @@ async function callDeepSeek(messages, settings, options = {}) {
 
   if (!res.ok) {
     clearTimeout(timeout)
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error?.message || `API 错误 ${res.status}`)
+    const errorText = await res.text().catch(() => '')
+    let message = ''
+    try { message = JSON.parse(errorText).error?.message || '' } catch { message = errorText.trim() }
+    throw new Error(message || `API 错误 ${res.status}`)
   }
 
   let content

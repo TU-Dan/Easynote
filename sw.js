@@ -1,4 +1,4 @@
-const CACHE = 'qsj-v13'
+const CACHE = 'qsj-v14'
 
 function isCacheableRequest(request) {
   if (request.method !== 'GET') return false
