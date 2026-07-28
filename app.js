@@ -1,33 +1,14 @@
 import { generateDailySummary, generateDailyLetter, extractAllFromSummary } from './api.js'
 import { configureSync, resendSignupEmail, signInWithPassword, signUpWithPassword, signOutOfSync, getCurrentUser, pullSyncState, pushSyncState } from './supabase-sync.js'
 import { SUPABASE_CONFIG } from './supabase-config.js'
+import { renderMarkdown } from './markdown.js'
+import { createStorage } from './storage.js'
+import { validateAiSettings, isCustomAiEndpoint, normalizeAiBaseUrl } from './ai-settings.js'
+import { dedupeKanbanCards, kanbanSemanticKey, normalizeKanbanText, textSimilarity } from './kanban-model.js'
+import { mergeDeletions, mergeSyncState } from './sync-state.js'
 
 // ── Storage ───────────────────────────────────────────────
-const K = { entries: 'qsj_entries', settings: 'qsj_settings', summaries: 'qsj_summaries', kanban: 'qsj_kanban' }
-function readJson(key, fallback) {
-  return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
-}
-function writeJson(key, value) {
-  localStorage.setItem(key, JSON.stringify(value))
-  queueSync()
-}
-const db = {
-  getEntries:   () => readJson(K.entries, []),
-  saveEntries:  v  => writeJson(K.entries, v),
-  getSettings:  () => readJson(K.settings, {}),
-  saveSettings: v  => writeJson(K.settings, v),
-  getSummaries: () => readJson(K.summaries, {}),
-  saveSummaries:v  => writeJson(K.summaries, v),
-  getKanban:    () => readJson(K.kanban, []),
-  saveKanban:   v  => writeJson(K.kanban, v)
-}
-
-function clearLocalData() {
-  localStorage.removeItem(K.entries)
-  localStorage.removeItem(K.summaries)
-  localStorage.removeItem(K.kanban)
-  localStorage.removeItem(K.settings)
-}
+const db = createStorage({ persistent: localStorage, session: sessionStorage, onChange: queueSync })
 
 // ── Supabase sync ─────────────────────────────────────────
 let syncReady = false
@@ -46,81 +27,29 @@ function getLocalState() {
     entries: db.getEntries(),
     summaries: db.getSummaries(),
     kanban: db.getKanban(),
-    settings: syncableSettings()
+    settings: syncableSettings(),
+    deletions: db.getDeletions()
   }
 }
 
-function mergeById(localItems, remoteItems) {
-  const merged = new Map()
-  for (const item of localItems || []) merged.set(item.id, item)
-  for (const item of remoteItems || []) merged.set(item.id, { ...merged.get(item.id), ...item })
-  return [...merged.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
-}
-
-function normalizeKanbanText(text = '') {
-  return text
-    .replace(/\*\*/g, '')
-    .replace(/[，。！？、；：,.!?;:()[\]（）【】"'“”‘’]/g, '')
-    .replace(/\s+/g, '')
-    .trim()
-    .toLowerCase()
-}
-
-function kanbanSemanticKey(card) {
-  return [
-    card.date || '',
-    card.type || '',
-    card.done ? 'done' : 'open',
-    normalizeKanbanText(card.text)
-  ].join('|')
-}
-
-function dedupeKanbanCards(cards = []) {
-  const byKey = new Map()
-  for (const card of cards) {
-    const key = kanbanSemanticKey(card)
-    const existing = byKey.get(key)
-    if (!existing) {
-      byKey.set(key, card)
-      continue
-    }
-
-    const existingScore = (existing.source === 'summary' ? 2 : 1) + (existing.id ? 1 : 0)
-    const cardScore = (card.source === 'summary' ? 2 : 1) + (card.id ? 1 : 0)
-    if (cardScore > existingScore) byKey.set(key, { ...existing, ...card })
-  }
-  return [...byKey.values()]
-}
-
-function mergeSummaries(localSummaries = {}, remoteSummaries = {}) {
-  const merged = { ...localSummaries }
-  for (const [date, remote] of Object.entries(remoteSummaries)) {
-    const local = merged[date]
-    if (!local || (remote?.ts || 0) >= (local?.ts || 0)) merged[date] = remote
-  }
-  return merged
-}
-
-function mergeState(localState, remoteState) {
-  if (!remoteState) return localState
-  return {
-    entries: mergeById(localState.entries, remoteState.entries),
-    summaries: mergeSummaries(localState.summaries, remoteState.summaries),
-    kanban: dedupeKanbanCards(mergeById(localState.kanban, remoteState.kanban)),
-    settings: {
-      ...localState.settings,
-      ...syncableSettings(remoteState.settings || {})
-    }
-  }
+function recordDeletions(entity, keys) {
+  if (!keys.length) return
+  const deletedAt = Date.now()
+  const next = mergeDeletions(
+    db.getDeletions(),
+    keys.map(key => ({ entity, key, deletedAt }))
+  )
+  db.saveDeletions(next)
 }
 
 function replaceLocalState(nextState) {
   const localSettings = db.getSettings()
 
-  writeJson(K.entries, nextState.entries || [])
-  writeJson(K.summaries, nextState.summaries || {})
-  writeJson(K.kanban, nextState.kanban || [])
-  writeJson(K.settings, {
+  db.saveEntries(nextState.entries || [])
+  db.saveSummaries(nextState.summaries || {})
+  db.saveKanban(nextState.kanban || [])
+  db.saveDeletions(nextState.deletions || [])
+  db.saveSettings({
     ...localSettings,
     ...syncableSettings(nextState.settings || {}),
     syncEmail: localSettings.syncEmail || ''
@@ -130,7 +59,7 @@ function replaceLocalState(nextState) {
 function applyRemoteState(remoteState) {
   if (!remoteState || !syncReady) return
   applyingRemoteState = true
-  replaceLocalState(mergeState(getLocalState(), remoteState))
+  replaceLocalState(mergeSyncState(getLocalState(), remoteState))
   applyingRemoteState = false
   renderAll()
 }
@@ -163,34 +92,6 @@ function todayLabel() {
 }
 function fmtTime(ts) { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}` }
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
-function textSimilarity(a, b) {
-  const cjk = s => [...s].filter(c => c >= '一' && c <= '鿿')
-  const sa = new Set(cjk(a)), sb = new Set(cjk(b))
-  if (!sa.size || !sb.size) return 0
-  const intersection = [...sa].filter(c => sb.has(c)).length
-  return intersection / (new Set([...sa, ...sb]).size)
-}
-function md2html(text) {
-  const bold = s => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  let html = '', inList = false
-  for (const line of text.split('\n')) {
-    if (/^#{2,3}\s/.test(line)) {
-      if (inList) { html += '</ul>'; inList = false }
-      html += line.replace(/^#{2,3}\s+(.+)$/, (_, t) => `<h3>${bold(t)}</h3>`)
-    } else if (line.startsWith('- ')) {
-      if (!inList) { html += '<ul>'; inList = true }
-      html += `<li>${bold(line.slice(2))}</li>`
-    } else if (line.trim() === '') {
-      if (inList) { html += '</ul>'; inList = false }
-    } else {
-      if (inList) { html += '</ul>'; inList = false }
-      if (line.trim()) html += `<p>${bold(line)}</p>`
-    }
-  }
-  if (inList) html += '</ul>'
-  return html
-}
-
 // ── Toast ─────────────────────────────────────────────────
 let toastTimer = null
 function toast(msg, ms = 2200) {
@@ -215,21 +116,32 @@ let calEnd   = null
 let kanbanStatusFilter = 'open'
 let authMode = 'login'
 let pendingConfirmationEmail = ''
+let localDevMode = false
 let summaryLoadingTimer = null
 let summaryProgressTimer = null
 let summaryProgress = 0
 let summaryController = null
 let summaryGenerating = false
 let summaryStreamingText = ''
+let summaryAutoAttemptKey = ''
+let kanbanSearch = ''
+const expandedRecentEntries = new Set()
+let settingsReturnFocus = null
+let calendarReturnFocus = null
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tab) {
   activeTab = tab
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'))
-  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'))
+  document.querySelectorAll('.nav-btn').forEach(el => {
+    el.classList.remove('active')
+    el.removeAttribute('aria-current')
+  })
   document.getElementById(`tab-${tab}`).classList.add('active')
-  document.querySelector(`.nav-btn[data-tab="${tab}"]`).classList.add('active')
-  if (tab === 'today')  renderToday()
+  const activeNav = document.querySelector(`.nav-btn[data-tab="${tab}"]`)
+  activeNav.classList.add('active')
+  activeNav.setAttribute('aria-current', 'page')
+  if (tab === 'today')  { renderToday(); maybeAutoOrganizeToday() }
   if (tab === 'kanban') renderKanban()
   if (tab === 'archive') renderArchive()
 }
@@ -243,13 +155,31 @@ function renderRecent() {
     return
   }
   list.innerHTML = entries.map(e => `
-    <div class="entry-card">
-      <div class="entry-body">
-        <div class="entry-text">${escHtml(e.content)}</div>
-        <div class="entry-meta">${fmtTime(e.timestamp)}</div>
+    <div class="entry-card" data-id="${e.id}">
+      <div class="entry-del-bg">
+        <button class="entry-del-btn js-entry-del" data-id="${e.id}" type="button">删除</button>
+      </div>
+      <div class="entry-inner" data-id="${e.id}">
+        <time class="entry-time">${fmtTime(e.timestamp)}</time>
+        <div class="entry-body">
+          <div class="entry-text${expandedRecentEntries.has(e.id) ? ' expanded' : ''}">${escHtml(e.content)}</div>
+        </div>
       </div>
     </div>
   `).join('')
+
+  list.querySelectorAll('.entry-inner').forEach(inner => {
+    inner.addEventListener('click', () => {
+      const id = inner.dataset.id
+      if (expandedRecentEntries.has(id)) expandedRecentEntries.delete(id)
+      else expandedRecentEntries.add(id)
+      renderRecent()
+    })
+  })
+  list.querySelectorAll('.js-entry-del').forEach(btn =>
+    btn.addEventListener('click', () => deleteEntry(btn.dataset.id))
+  )
+  initRecentEntryGestures()
 }
 
 function saveEntry() {
@@ -259,15 +189,120 @@ function saveEntry() {
   const entries = db.getEntries()
   entries.push({ id: crypto.randomUUID(), content, timestamp: Date.now(), date: todayKey() })
   db.saveEntries(entries)
+  syncKanbanFromRecords()
   input.value = ''
-  input.focus()
+  input.blur()
   renderRecent()
+  if (activeTab === 'kanban') renderKanban()
+  if (activeTab === 'today') renderToday()
   toast('已保存 ✓')
+}
+
+function deleteEntry(id) {
+  if (!id) return
+  expandedRecentEntries.delete(id)
+  const deletedCardIds = db.getKanban()
+    .filter(c => c.source === 'record' && c.sourceEntryId === id)
+    .map(c => c.id)
+  recordDeletions('entry', [id])
+  recordDeletions('kanban', deletedCardIds)
+  db.saveEntries(db.getEntries().filter(e => e.id !== id))
+  const entryIds = new Set(db.getEntries().map(e => e.id))
+  db.saveKanban(db.getKanban().filter(c => c.source !== 'record' || !c.sourceEntryId || entryIds.has(c.sourceEntryId)))
+  renderRecent()
+  if (activeTab === 'kanban') renderKanban()
+  if (activeTab === 'today') renderToday()
+  toast('已删除')
+}
+
+let recentGesture = null
+let recentSwiped = new Set()
+
+function initRecentEntryGestures() {
+  const list = document.getElementById('recent-list')
+  list.removeEventListener('touchstart', onRecentTS)
+  list.removeEventListener('touchmove', onRecentTM)
+  list.removeEventListener('touchend', onRecentTE)
+  list.addEventListener('touchstart', onRecentTS, { passive: true })
+  list.addEventListener('touchmove', onRecentTM, { passive: false })
+  list.addEventListener('touchend', onRecentTE, { passive: true })
+}
+
+function onRecentTS(e) {
+  const inner = e.target.closest('.entry-inner')
+  if (!inner) return
+  const id = inner.dataset.id
+  recentGesture = {
+    id,
+    inner,
+    startX: e.touches[0].clientX,
+    startY: e.touches[0].clientY,
+    baseX: recentSwiped.has(id) ? -72 : 0,
+    type: 'pending'
+  }
+}
+
+function onRecentTM(e) {
+  if (!recentGesture) return
+  const dx = e.touches[0].clientX - recentGesture.startX
+  const dy = e.touches[0].clientY - recentGesture.startY
+  if (recentGesture.type === 'pending') {
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return
+    if (Math.abs(dy) > Math.abs(dx)) { recentGesture = null; return }
+    recentGesture.type = 'swipe'
+  }
+  const x = Math.max(Math.min(recentGesture.baseX + dx, 0), -72)
+  recentGesture.inner.style.transition = 'none'
+  recentGesture.inner.style.transform = `translateX(${x}px)`
+  e.preventDefault()
+}
+
+function onRecentTE(e) {
+  if (!recentGesture) return
+  const dx = e.changedTouches[0].clientX - recentGesture.startX
+  const final = recentGesture.baseX + dx
+  recentGesture.inner.style.transition = 'transform .2s ease'
+  if (final < -36) {
+    recentGesture.inner.style.transform = 'translateX(-72px)'
+    recentSwiped.add(recentGesture.id)
+  } else {
+    recentGesture.inner.style.transform = 'translateX(0)'
+    recentSwiped.delete(recentGesture.id)
+  }
+  recentGesture = null
 }
 
 // ── Render: Today tab ─────────────────────────────────────
 function renderToday() {
   renderTodaySummaryArea()
+}
+
+function entryFingerprint(entries) {
+  return entries
+    .map(e => `${e.id}:${e.timestamp}:${e.content}`)
+    .join('|')
+}
+
+function todayEntriesAndHash() {
+  const today = todayKey()
+  const entries = db.getEntries().filter(e => e.date === today)
+  return { today, entries, hash: entryFingerprint(entries) }
+}
+
+function shouldAutoOrganizeToday() {
+  const settings = db.getSettings()
+  if (!settings.apiKey || summaryGenerating) return false
+  const { today, entries, hash } = todayEntriesAndHash()
+  if (!entries.length || !hash) return false
+  const saved = db.getSummaries()[today]
+  if (saved?.entryHash === hash && (saved?.text || '').trim()) return false
+  if (summaryAutoAttemptKey === `${today}:${hash}`) return false
+  return true
+}
+
+function maybeAutoOrganizeToday() {
+  if (!shouldAutoOrganizeToday()) return
+  handleGenerateSummary({ auto: true })
 }
 
 function renderTodaySummaryArea() {
@@ -296,7 +331,7 @@ function renderTodaySummaryArea() {
     entries.length ? `今日已记录 ${entries.length} 条` : '今天还没有记录'
 
   if (saved) {
-    document.getElementById('today-summary-preview').innerHTML = md2html(saved.text)
+    document.getElementById('today-summary-preview').innerHTML = renderMarkdown(saved.text)
     document.getElementById('today-summary-text').value = saved.text
     showSummaryPreview()
   }
@@ -304,11 +339,10 @@ function renderTodaySummaryArea() {
 
 
 // ── Today: generate summary ───────────────────────────────
-async function handleGenerateSummary() {
+async function handleGenerateSummary(options = {}) {
   const settings = db.getSettings()
   if (!settings.apiKey) { toast('请先在设置中配置 API Key'); openSettings(); return }
-  const today   = todayKey()
-  const entries = db.getEntries().filter(e => e.date === today)
+  const { today, entries, hash } = todayEntriesAndHash()
   if (!entries.length) { toast('今天还没有记录'); return }
 
   document.getElementById('today-summary-idle').hidden    = true
@@ -318,6 +352,7 @@ async function handleGenerateSummary() {
   document.getElementById('today-gen-btn').disabled = true
   document.getElementById('today-summary-loading-text').textContent = '正在归纳今天的内容...'
   summaryGenerating = true
+  summaryAutoAttemptKey = `${today}:${hash}`
   summaryStreamingText = ''
   renderStreamingSummary('')
   setSummaryProgress(4)
@@ -349,16 +384,17 @@ async function handleGenerateSummary() {
     }, today, db.getKanban())
     setSummaryProgress(100)
     const summaries = db.getSummaries()
-    summaries[today] = { ...(summaries[today] || {}), text, ts: Date.now() }
+    summaries[today] = { ...(summaries[today] || {}), text, entryHash: hash, ts: Date.now() }
     db.saveSummaries(summaries)
-    toast('今日总结已生成 ✓')
     summaryGenerating = false
     summaryStreamingText = ''
     document.getElementById('today-summary-loading').hidden = true
     document.getElementById('today-summary-result').hidden  = false
-    document.getElementById('today-summary-preview').innerHTML = md2html(text)
+    document.getElementById('today-summary-preview').innerHTML = renderMarkdown(text)
     document.getElementById('today-summary-text').value = text
     showSummaryPreview()
+    addSummaryTextToKanban(text, { silent: true, stay: true })
+    toast(options.auto ? '今日已自动整理 ✓' : '今日总结已生成 ✓')
   } catch (err) {
     summaryGenerating = false
     summaryStreamingText = ''
@@ -440,9 +476,13 @@ function openLetter(date) {
   if (!s) return
   archiveOpenDate = date
   document.getElementById('archive-list-view').hidden = true
-  document.getElementById('archive-detail').hidden = false
-  document.getElementById('archive-letter-date').textContent = date
-  document.getElementById('archive-letter-body').innerHTML = md2html(s.letter || '')
+  const detail = document.getElementById('archive-detail')
+  detail.hidden = false
+  detail.style.transform = ''
+  detail.style.opacity = ''
+  detail.scrollTop = 0
+  document.getElementById('archive-letter-date').textContent = formatLetterDate(date)
+  document.getElementById('archive-letter-body').innerHTML = renderMarkdown(s.letter || '')
   document.getElementById('archive-reflection').value = s.reflection || ''
   setFavButton(!!s.favorite)
 }
@@ -481,6 +521,82 @@ function saveReflection() {
   toast('补充已保存 ✓')
 }
 
+function formatLetterDate(dateStr) {
+  const [y, m, d] = (dateStr || '').split('-').map(Number)
+  if (!y) return dateStr
+  const wk = new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('zh-CN', { weekday: 'long' })
+  return `${y}年${m}月${d}日 · ${wk}`
+}
+
+// Share the letter text + date (never the private reflection)
+async function shareLetter() {
+  if (!archiveOpenDate) return
+  const s = db.getSummaries()[archiveOpenDate]
+  if (!s || !(s.letter || '').trim()) { toast('这封信还没有内容'); return }
+  const body = s.letter.replace(/\*\*/g, '').trim()
+  const text = `${formatLetterDate(archiveOpenDate)}\n\n${body}\n\n—— 来自 EasyNote`
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: `EasyNote · ${archiveOpenDate}`, text })
+    } else {
+      await navigator.clipboard.writeText(text)
+      toast('已复制到剪贴板 ✓')
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return
+    try { await navigator.clipboard.writeText(text); toast('已复制到剪贴板 ✓') }
+    catch { toast('分享失败') }
+  }
+}
+
+// Right-swipe on the letter detail to go back (mirrors the recent-entry gesture)
+let letterSwipe = null
+function initLetterSwipe() {
+  const el = document.getElementById('archive-detail')
+  el.addEventListener('touchstart', onLetterTS, { passive: true })
+  el.addEventListener('touchmove', onLetterTM, { passive: false })
+  el.addEventListener('touchend', onLetterTE, { passive: true })
+}
+function onLetterTS(e) {
+  if (e.target.closest('textarea, input, button')) { letterSwipe = null; return }
+  letterSwipe = {
+    el: document.getElementById('archive-detail'),
+    startX: e.touches[0].clientX,
+    startY: e.touches[0].clientY,
+    type: 'pending'
+  }
+}
+function onLetterTM(e) {
+  if (!letterSwipe) return
+  const dx = e.touches[0].clientX - letterSwipe.startX
+  const dy = e.touches[0].clientY - letterSwipe.startY
+  if (letterSwipe.type === 'pending') {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return
+    if (dx <= 0 || Math.abs(dy) > Math.abs(dx)) { letterSwipe = null; return }
+    letterSwipe.type = 'swipe'
+  }
+  const x = Math.max(0, dx)
+  letterSwipe.el.style.transition = 'none'
+  letterSwipe.el.style.transform = `translateX(${x}px)`
+  letterSwipe.el.style.opacity = String(Math.max(0.4, 1 - x / 600))
+  e.preventDefault()
+}
+function onLetterTE(e) {
+  if (!letterSwipe || letterSwipe.type !== 'swipe') { letterSwipe = null; return }
+  const dx = e.changedTouches[0].clientX - letterSwipe.startX
+  const el = letterSwipe.el
+  el.style.transition = 'transform .2s ease, opacity .2s ease'
+  if (dx > 80) {
+    el.style.transform = 'translateX(100%)'
+    el.style.opacity = '0'
+    setTimeout(() => { el.style.transform = ''; el.style.opacity = ''; closeLetter() }, 180)
+  } else {
+    el.style.transform = 'translateX(0)'
+    el.style.opacity = '1'
+  }
+  letterSwipe = null
+}
+
 // Auto-write a letter for past days that have records but no letter yet
 async function backfillLetters() {
   const settings = db.getSettings()
@@ -513,13 +629,15 @@ function renderStreamingSummary(text) {
   const preview = document.getElementById('today-summary-stream')
   if (!preview) return
   preview.hidden = !text.trim()
-  preview.innerHTML = text.trim() ? md2html(text) : ''
+  preview.innerHTML = text.trim() ? renderMarkdown(text) : ''
 }
 
 function setSummaryProgress(value) {
   summaryProgress = Math.max(0, Math.min(100, Math.round(value)))
   document.getElementById('today-summary-progress-text').textContent = `${summaryProgress}%`
-  document.getElementById('today-summary-progress-bar').style.width = `${summaryProgress}%`
+  const progressBar = document.getElementById('today-summary-progress-bar')
+  progressBar.style.width = `${summaryProgress}%`
+  progressBar.setAttribute('aria-valuenow', String(summaryProgress))
   document.getElementById('today-nav-progress').textContent = `${summaryProgress}%`
 }
 
@@ -543,15 +661,17 @@ function cancelSummaryGeneration() {
 }
 
 // ── Today: add to kanban ──────────────────────────────────
-function handleAddToKanban() {
+function addSummaryTextToKanban(text, options = {}) {
   const today = todayKey()
-  const text = document.getElementById('today-summary-text').value.trim()
   const items = text ? extractAllFromSummary(text) : []
-  if (!items.length) { toast('没有识别到可加入的事项'); return }
+  if (!items.length) {
+    if (!options.silent) toast('没有识别到可加入的事项')
+    return { added: 0, updated: 0 }
+  }
 
   // Persist any edits the user made
   const summaries = db.getSummaries()
-  if (summaries[today]) { summaries[today].text = text; db.saveSummaries(summaries) }
+  if (summaries[today]) { summaries[today].text = text; summaries[today].ts = Date.now(); db.saveSummaries(summaries) }
 
   const allCards = dedupeKanbanCards(db.getKanban())
   const reusableSummaryCards = allCards.filter(c =>
@@ -571,17 +691,18 @@ function handleAddToKanban() {
     if (batchKeys.has(key)) continue
     batchKeys.add(key)
 
+    // Skip if this item already exists anywhere on the board (any date/type/status),
+    // so old or completed items don't resurface in today's organize.
+    const candNorm = normalizeKanbanText(candidate.text)
     if (existing.some(c =>
-      c.type === candidate.type &&
-      !!c.done === !!candidate.done &&
-      textSimilarity(c.text, candidate.text) >= 0.65
+      normalizeKanbanText(c.text) === candNorm ||
+      (c.type === candidate.type && textSimilarity(c.text, candidate.text) >= 0.65)
     )) continue
 
     const reusable = reusableSummaryCards.find(c =>
       !reusedIds.has(c.id) &&
-      c.type === candidate.type &&
-      !!c.done === !!candidate.done &&
-      textSimilarity(c.text, candidate.text) >= 0.65
+      (normalizeKanbanText(c.text) === candNorm ||
+       (c.type === candidate.type && textSimilarity(c.text, candidate.text) >= 0.65))
     )
     if (reusable) reusedIds.add(reusable.id)
     if (reusable) {
@@ -596,16 +717,26 @@ function handleAddToKanban() {
       id: reusable?.id || crypto.randomUUID(),
       text: candidate.text,
       type: candidate.type,
-      done: candidate.done,
+      // keep a manually-completed card completed across re-organize (completion wins)
+      done: reusable ? (reusable.done || candidate.done) : candidate.done,
       date: today,
       source: 'summary'
     })
   }
   db.saveKanban(dedupeKanbanCards([...existing, ...newItems]))
 
-  if (added === 0 && updated === 0) { toast('看板已是最新'); return }
-  toast(added ? '已加入看板 ✓' : '看板已更新 ✓')
-  switchTab('kanban')
+  if (!options.silent) {
+    if (added === 0 && updated === 0) toast('看板已是最新')
+    else toast(added ? '已加入看板 ✓' : '看板已更新 ✓')
+  }
+  if (!options.stay && (added || updated)) switchTab('kanban')
+  if (activeTab === 'kanban') renderKanban()
+  return { added, updated }
+}
+
+function handleAddToKanban() {
+  const text = document.getElementById('today-summary-text').value.trim()
+  addSummaryTextToKanban(text)
 }
 
 
@@ -634,7 +765,7 @@ function extractCheckboxItems(entries) {
       if (!m) continue
       const text = m[2].trim()
       if (!text) continue
-      items.push({ text, type: 'todo', done: m[1] === '☑', date: e.date })
+      items.push({ text, type: 'todo', done: m[1] === '☑', date: e.date, sourceEntryId: e.id })
     }
   }
   return items
@@ -643,8 +774,10 @@ function extractCheckboxItems(entries) {
 // Materialize ☐/☑ records into kanban cards so the board works without a summary
 function syncKanbanFromRecords() {
   const items = extractCheckboxItems(db.getEntries())
-  if (!items.length) return
-  const cards = dedupeKanbanCards(db.getKanban())
+  const entryIds = new Set(db.getEntries().map(e => e.id))
+  const cards = dedupeKanbanCards(db.getKanban()).filter(c =>
+    c.source !== 'record' || !c.sourceEntryId || entryIds.has(c.sourceEntryId)
+  )
   const seen = new Set(cards.map(c => `${c.date}|${c.type}|${normalizeKanbanText(c.text)}`))
   const additions = []
   for (const it of items) {
@@ -657,11 +790,13 @@ function syncKanbanFromRecords() {
       type: it.type,
       done: it.done,
       date: it.date,
-      source: 'record'
+      source: 'record',
+      sourceEntryId: it.sourceEntryId
     })
   }
-  if (!additions.length) return
-  db.saveKanban(dedupeKanbanCards([...cards, ...additions]))
+  const next = dedupeKanbanCards([...cards, ...additions])
+  if (!additions.length && next.length === db.getKanban().length) return
+  db.saveKanban(next)
   queueSync(300)
 }
 
@@ -682,6 +817,10 @@ function renderKanban() {
       cards = []
     }
   }
+  const q = kanbanSearch.trim().toLowerCase()
+  if (q) {
+    cards = cards.filter(c => `${c.text} ${c.date} ${FILTER_LABELS[c.type] || c.type}`.toLowerCase().includes(q))
+  }
   cards = kanbanStatusFilter === 'done' ? cards.filter(c => c.done) : cards.filter(c => !c.done)
   const list     = document.getElementById('kanban-list')
   const empty    = document.getElementById('kanban-empty')
@@ -698,8 +837,11 @@ function renderKanban() {
     : kanbanDateFilter === 'other' && kanbanDateFrom
     ? (() => { const to = kanbanDateTo || kanbanDateFrom; return statsBase.filter(c => c.date >= kanbanDateFrom && c.date <= to) })()
     : statsBase.filter(c => !isArchived(c))
-  const openCount = statsDated.filter(c => !c.done).length
-  const doneCount = statsDated.filter(c => c.done).length
+  const statsSearched = q
+    ? statsDated.filter(c => `${c.text} ${c.date} ${FILTER_LABELS[c.type] || c.type}`.toLowerCase().includes(q))
+    : statsDated
+  const openCount = statsSearched.filter(c => !c.done).length
+  const doneCount = statsSearched.filter(c => c.done).length
   // Put counts on the status filter tabs
   const openBtn = document.querySelector('#kanban-status-filters [data-status="open"]')
   const doneBtn = document.querySelector('#kanban-status-filters [data-status="done"]')
@@ -756,6 +898,7 @@ function renderKanban() {
   // Delete button (revealed by swipe)
   list.querySelectorAll('.js-k-del').forEach(btn =>
     btn.addEventListener('click', () => {
+      recordDeletions('kanban', [btn.dataset.id])
       db.saveKanban(db.getKanban().filter(c => c.id !== btn.dataset.id))
       renderKanban()
     })
@@ -951,6 +1094,7 @@ function updateOtherBtnLabel() {
 }
 
 function openCalendar() {
+  calendarReturnFocus = document.activeElement
   calYear  = new Date().getFullYear()
   calMonth = new Date().getMonth()
   // Initialise temp selection from committed range
@@ -958,10 +1102,13 @@ function openCalendar() {
   calEnd   = kanbanDateTo   || null
   renderCalendar()
   document.getElementById('cal-overlay').hidden = false
+  document.getElementById('cal-close').focus()
 }
 
 function closeCalendar() {
   document.getElementById('cal-overlay').hidden = true
+  calendarReturnFocus?.focus()
+  calendarReturnFocus = null
 }
 
 function cancelCalendar() {
@@ -1007,7 +1154,7 @@ function renderCalendar() {
   const rangeE = calStart && calEnd ? (calStart <= calEnd ? calEnd : calStart) : calStart
 
   let html = ''
-  for (let i = 0; i < firstDow; i++) html += '<button class="cal-day empty"></button>'
+  for (let i = 0; i < firstDow; i++) html += '<button class="cal-day empty" type="button" tabindex="-1" aria-hidden="true"></button>'
 
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${calYear}-${pad(calMonth + 1)}-${pad(d)}`
@@ -1018,7 +1165,7 @@ function renderCalendar() {
       else if (ds === rangeE)             cls += ' range-end in-range'
       else if (ds > rangeS && ds < rangeE) cls += ' in-range'
     } else if (rangeS && ds === rangeS)  cls += ' selected'
-    html += `<button class="${cls}" data-date="${ds}">${d}</button>`
+    html += `<button class="${cls}" type="button" data-date="${ds}" aria-label="${ds}">${d}</button>`
   }
 
   grid.innerHTML = html
@@ -1056,24 +1203,55 @@ function showSummaryEdit() {
 
 // ── Settings ──────────────────────────────────────────────
 function openSettings() {
+  settingsReturnFocus = document.activeElement
   const s = db.getSettings()
   const user = getCurrentUser()
   document.getElementById('setting-api-key').value  = s.apiKey  || ''
   document.getElementById('setting-base-url').value = s.baseUrl || ''
+  document.getElementById('setting-custom-endpoint-approved').checked = false
+  updateCustomEndpointWarning()
+  let showAdvanced = false
+  try { showAdvanced = isCustomAiEndpoint(s.baseUrl) } catch { showAdvanced = true }
+  setAdvancedSettingsVisible(showAdvanced)
   document.getElementById('account-email').textContent = user?.email ? `当前账号：${user.email}` : '未登录'
   document.getElementById('settings-modal').hidden       = false
+  document.getElementById('close-settings-btn').focus()
 }
-function closeSettings() { document.getElementById('settings-modal').hidden = true }
+function closeSettings() {
+  document.getElementById('settings-modal').hidden = true
+  settingsReturnFocus?.focus()
+  settingsReturnFocus = null
+}
 async function saveSettingsForm() {
-  const prev = db.getSettings()
-  db.saveSettings({
-    ...prev,
-    apiKey:  document.getElementById('setting-api-key').value.trim(),
-    baseUrl: document.getElementById('setting-base-url').value.trim()
-  })
+  const apiKey = document.getElementById('setting-api-key').value.trim()
+  const approval = document.getElementById('setting-custom-endpoint-approved').checked
+  let baseUrl
+  try {
+    baseUrl = normalizeAiBaseUrl(document.getElementById('setting-base-url').value)
+    const approvedBaseUrl = isCustomAiEndpoint(baseUrl) && approval ? baseUrl : ''
+    if (apiKey) validateAiSettings({ apiKey, baseUrl, approvedBaseUrl })
+    db.saveSettings({ ...db.getSettings(), apiKey, baseUrl, approvedBaseUrl })
+  } catch (err) {
+    toast(err.message, 4000)
+    return
+  }
   queueSync(100)
   closeSettings()
   toast('设置已保存')
+}
+
+function updateCustomEndpointWarning() {
+  const warning = document.getElementById('custom-endpoint-warning')
+  try {
+    warning.hidden = !isCustomAiEndpoint(document.getElementById('setting-base-url').value)
+  } catch {
+    warning.hidden = true
+  }
+}
+
+function setAdvancedSettingsVisible(visible) {
+  document.getElementById('advanced-settings').hidden = !visible
+  document.getElementById('advanced-settings-toggle').setAttribute('aria-expanded', String(visible))
 }
 
 async function initAuth() {
@@ -1087,12 +1265,14 @@ async function initAuth() {
       onRemoteState: applyRemoteState
     })
 
+    if (localDevMode) return
     if (!user) {
       showAuthScreen()
       return
     }
     await enterApp()
   } catch (err) {
+    if (localDevMode) return
     showAuthScreen(`登录服务不可用：${err.message}`)
   }
 }
@@ -1100,7 +1280,7 @@ async function initAuth() {
 async function enterApp() {
   const localState = getLocalState()
   const remoteState = await pullSyncState()
-  const nextState = mergeState(localState, remoteState)
+  const nextState = mergeSyncState(localState, remoteState)
 
   syncReady = true
   applyingRemoteState = true
@@ -1108,6 +1288,7 @@ async function enterApp() {
   applyingRemoteState = false
   document.getElementById('auth-screen').hidden = true
   document.getElementById('app-shell').hidden = false
+  hideSplash()
   setSyncStatus(`已登录：${getCurrentUser()?.email || ''}`)
   renderAll()
   queueSync(100)
@@ -1118,7 +1299,63 @@ async function enterApp() {
 function showAuthScreen(message = '') {
   document.getElementById('app-shell').hidden = true
   document.getElementById('auth-screen').hidden = false
+  hideSplash()
   setAuthStatus(message)
+}
+
+const DAILY_QUOTES = [
+  '把今天的零碎，收进一页安静。',
+  '慢一点，也是一种前进。',
+  '记下来，心就轻了。',
+  '你已经做得很好了。',
+  '微小的坚持，终会发光。',
+  '允许自己，有一个普通的今天。',
+  '认真生活的人，值得被温柔记录。'
+]
+const SPLASH_MIN_MS = 1600
+const splashShownAt = Date.now()
+function hideSplash() {
+  const s = document.getElementById('splash')
+  if (!s || s.hidden) return
+  const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - splashShownAt))
+  setTimeout(() => {
+    s.classList.add('splash-hide')
+    setTimeout(() => { s.hidden = true }, 380)
+  }, wait)
+}
+function todayQuote() {
+  const d = new Date()
+  const idx = (d.getFullYear() * 372 + d.getMonth() * 31 + d.getDate()) % DAILY_QUOTES.length
+  return DAILY_QUOTES[idx]
+}
+function showDailyQuote() {
+  const el = document.getElementById('splash-quote')
+  if (el) el.textContent = todayQuote()
+  const banner = document.getElementById('daily-quote-banner')
+  if (banner && localStorage.getItem('daily_quote_dismissed') !== todayKey()) {
+    document.getElementById('daily-quote-text').textContent = todayQuote()
+    banner.hidden = false
+  }
+}
+function dismissDailyQuote() {
+  localStorage.setItem('daily_quote_dismissed', todayKey())
+  document.getElementById('daily-quote-banner').hidden = true
+}
+
+function isLocalDevHost() {
+  return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+}
+
+function enterLocalDevApp() {
+  localDevMode = true
+  syncReady = false
+  applyingRemoteState = false
+  document.getElementById('auth-screen').hidden = true
+  document.getElementById('app-shell').hidden = false
+  hideSplash()
+  setSyncStatus('本地测试模式：未连接同步')
+  renderAll()
+  setTimeout(() => document.getElementById('capture-input').focus(), 150)
 }
 
 function setAuthMode(mode) {
@@ -1137,6 +1374,7 @@ function setAuthStatus(text) {
 }
 
 async function handleAuthSubmit() {
+  localDevMode = false
   if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) {
     setAuthStatus('应用还没有配置 Supabase')
     return
@@ -1196,9 +1434,10 @@ async function handleResendSignupEmail() {
 
 async function handleSignOut() {
   try {
+    localDevMode = false
     syncReady = false
     await signOutOfSync()
-    clearLocalData()
+    db.clearAll()
     renderAll()
     closeSettings()
     showAuthScreen('已退出账号')
@@ -1212,11 +1451,47 @@ function renderAll() {
   if (activeTab === 'today') renderToday()
   if (activeTab === 'kanban') renderKanban()
   if (activeTab === 'archive' && !archiveOpenDate) renderArchive()
+  if (db.consumeRecoveries().length) {
+    toast('检测到损坏的本地数据，已安全隔离并继续启动', 4000)
+  }
+}
+
+function handleDialogKeyboard(e) {
+  const dialog = !document.getElementById('settings-modal').hidden
+    ? document.getElementById('settings-modal')
+    : !document.getElementById('cal-overlay').hidden
+      ? document.getElementById('cal-overlay')
+      : null
+  if (!dialog) return
+
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    if (dialog.id === 'settings-modal') closeSettings()
+    else cancelCalendar()
+    return
+  }
+  if (e.key !== 'Tab') return
+
+  const focusable = [...dialog.querySelectorAll('button:not([hidden]):not([disabled]), input:not([hidden]):not([disabled]), textarea:not([hidden]):not([disabled])')]
+    .filter(element => element.offsetParent !== null)
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault()
+    first.focus()
+  }
 }
 
 
 // ── Init ──────────────────────────────────────────────────
 function init() {
+  showDailyQuote()
+  document.addEventListener('keydown', handleDialogKeyboard)
+  document.getElementById('daily-quote-close').addEventListener('click', dismissDailyQuote)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker
       .register('sw.js', { updateViaCache: 'none' })
@@ -1228,6 +1503,11 @@ function init() {
   document.getElementById('auth-login-tab').addEventListener('click', () => setAuthMode('login'))
   document.getElementById('auth-register-tab').addEventListener('click', () => setAuthMode('register'))
   document.getElementById('auth-submit-btn').addEventListener('click', handleAuthSubmit)
+  const localDevBtn = document.getElementById('local-dev-btn')
+  if (isLocalDevHost()) {
+    localDevBtn.hidden = false
+    localDevBtn.addEventListener('click', enterLocalDevApp)
+  }
   document.getElementById('auth-resend-btn').addEventListener('click', handleResendSignupEmail)
   document.getElementById('auth-password').addEventListener('keydown', e => {
     if (e.key === 'Enter') handleAuthSubmit()
@@ -1239,7 +1519,10 @@ function init() {
   // Capture
   document.getElementById('save-btn').addEventListener('click', saveEntry)
   document.getElementById('capture-input').addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveEntry()
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault()
+      saveEntry()
+    }
   })
 
   // Tabs
@@ -1267,6 +1550,8 @@ function init() {
     renderArchive()
   })
   document.getElementById('archive-fav-btn').addEventListener('click', toggleFavorite)
+  document.getElementById('archive-share-btn').addEventListener('click', shareLetter)
+  initLetterSwipe()
   document.getElementById('archive-fav-filter').addEventListener('click', e => {
     archiveFavOnly = !archiveFavOnly
     const btn = e.currentTarget
@@ -1294,7 +1579,9 @@ function init() {
       const today = todayKey()
       const s = db.getSummaries()
       if (s[today]) { s[today].text = text; db.saveSummaries(s) }
-      document.getElementById('today-summary-preview').innerHTML = md2html(text)
+      document.getElementById('today-summary-preview').innerHTML = renderMarkdown(text)
+      addSummaryTextToKanban(text, { silent: true, stay: true })
+      toast('整理已更新 ✓')
       showSummaryPreview()
     } else {
       showSummaryEdit()
@@ -1360,9 +1647,16 @@ function init() {
     renderKanban()
   })
 
+  document.getElementById('kanban-search').addEventListener('input', e => {
+    kanbanSearch = e.target.value
+    renderKanban()
+  })
+
   // Kanban clear done
   document.getElementById('kanban-clear-done-btn').addEventListener('click', () => {
-    db.saveKanban(db.getKanban().filter(c => !c.done))
+    const cards = db.getKanban()
+    recordDeletions('kanban', cards.filter(c => c.done).map(c => c.id))
+    db.saveKanban(cards.filter(c => !c.done))
     renderKanban()
   })
 
@@ -1371,6 +1665,13 @@ function init() {
   document.getElementById('close-settings-btn').addEventListener('click', closeSettings)
   document.getElementById('modal-backdrop').addEventListener('click', closeSettings)
   document.getElementById('save-settings-btn').addEventListener('click', saveSettingsForm)
+  document.getElementById('advanced-settings-toggle').addEventListener('click', e => {
+    setAdvancedSettingsVisible(e.currentTarget.getAttribute('aria-expanded') !== 'true')
+  })
+  document.getElementById('setting-base-url').addEventListener('input', () => {
+    document.getElementById('setting-custom-endpoint-approved').checked = false
+    updateCustomEndpointWarning()
+  })
   document.getElementById('sign-out-btn').addEventListener('click', handleSignOut)
 
   document.getElementById('today-summary-text').addEventListener('input', e => {

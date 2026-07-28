@@ -1,5 +1,8 @@
+import { DEFAULT_AI_BASE_URL, DEFAULT_AI_MODEL, validateAiSettings } from './ai-settings.js'
+
 async function callDeepSeek(messages, settings, options = {}) {
-  const base = (settings.baseUrl || 'https://api.deepseek.com').replace(/\/$/, '')
+  const safeSettings = validateAiSettings(settings)
+  const base = safeSettings.baseUrl
   const controller = options.controller || new AbortController()
   let timedOut = false
 
@@ -11,20 +14,28 @@ async function callDeepSeek(messages, settings, options = {}) {
 
   let res
   try {
+    const model = safeSettings.model || DEFAULT_AI_MODEL
+    const body = {
+      model,
+      messages,
+      temperature: 0.2,
+      max_tokens: 1800,
+      stream: true
+    }
+    // The retired deepseek-chat alias used non-thinking mode. Preserve that
+    // quick-summary behavior with the current V4 model.
+    if (!safeSettings.model && base === DEFAULT_AI_BASE_URL && model === DEFAULT_AI_MODEL) {
+      body.thinking = { type: 'disabled' }
+    }
+
     res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settings.apiKey}`
+        'Authorization': `Bearer ${safeSettings.apiKey}`
       },
-      body: JSON.stringify({
-        model: settings.model || 'deepseek-chat',
-        messages,
-        temperature: 0.2,
-        max_tokens: 1800,
-        stream: true
-      })
+      body: JSON.stringify(body)
     })
   } catch (err) {
     clearTimeout(timeout)
@@ -36,8 +47,10 @@ async function callDeepSeek(messages, settings, options = {}) {
 
   if (!res.ok) {
     clearTimeout(timeout)
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error?.message || `API 错误 ${res.status}`)
+    const errorText = await res.text().catch(() => '')
+    let message = ''
+    try { message = JSON.parse(errorText).error?.message || '' } catch { message = errorText.trim() }
+    throw new Error(message || `API 错误 ${res.status}`)
   }
 
   let content
@@ -114,17 +127,9 @@ export function buildDailySummaryPrompt(entries, date, kanban = []) {
       .trim()
   }))
   const text = compactEntries.map((e, i) => `${i + 1}. [${e.time}]\n${e.content}`).join('\n\n')
-  const openItems = kanban.filter(c => !c.done)
-  const doneItems = kanban.filter(c => c.done)
-  const kanbanSection = (openItems.length || doneItems.length) ? `
-看板现有状态（仅供参考，用于判断完成情况，不要因此跳过今日记录）：
-${openItems.length ? `待完成：\n${openItems.map(c => `- ${c.text}`).join('\n')}` : ''}
-${doneItems.length ? `已完成：\n${doneItems.map(c => `- ${c.text}`).join('\n')}` : ''}
----
-` : ''
 
   return `你是用户的私人助理，帮助把零散记录整理成清晰、可执行的一日总结。
-${kanbanSection}
+只依据下面今天的记录来判断，不要凭空补充历史事项。
 用户今天（${date}）的记录（未分类，请自行判断类型）：
 
 ${text}
@@ -140,16 +145,21 @@ ${text}
 如果某个板块没有内容，就跳过该板块。
 为了让“加入看板”能识别事项，请在 Todo、已完成、重要提醒这几个板块中使用 "- " 输出条目；其他板块可以按最自然的方式表达。
 请覆盖今天的所有记录，每一条都要有所呈现，不要遗漏任何一条。可以合并高度相似的内容，但不能跳过。
+同一个事项只能出现一次。不要在 Todo 和已完成中重复同一件事。
+每条看板候选事项必须是一个独立动作或明确结果，不要把多个无关事项塞进一条。
+条目文字不要带 "☐"、"☑"、编号、状态标签或多余解释。
 
 ### 📋 Todo 回顾
 - **默认分类**：任何需要去做、打算去做、计划中的事项，都放这里。
 - 没有符号、没有截止时间、语义模糊的可执行条目，统一归 Todo，不要归提醒。
 - ☑ 项不放这里。最多 8 条。
+- 每条用 "- " 开头，写成可直接放进看板的短句。
 
 ### ✅ 已完成
 - 只列出明确带有 "☑" 符号、或句子中有"已完成""做完了""搞定了"等明确完成语义的事项。
 - 没有 ☑ 符号、且语义模糊或未来导向（如"头发补色""制定计划"）的条目，一律不放这里，归 Todo 或提醒。
 - 宁可少归已完成，不要误判。最多 6 条。
+- 每条用 "- " 开头，写成已经完成的结果，不要再像待办一样表达。
 
 ### 💭 感触洞见
 - 仅当记录中确实有深度判断、反思或方向感时才输出，最多 3 条。
@@ -161,6 +171,7 @@ ${text}
 ### ⏰ 重要提醒
 - 只放有明确截止时间、或用了"提醒""记得""别忘""deadline"等字眼的内容。
 - 普通的计划和待办（如"头发补色""制定计划"）不放这里，放 Todo。最多 4 条。
+- 每条用 "- " 开头。
 
 ### ✨ 今日寄语
 - 仅当今天的记录有足够的情感厚度或值得回味的内容时才写，一句话，温和有力量。
@@ -197,8 +208,8 @@ ${text}
 
 请基于这些记录，写一封温暖、真诚的信。要求：
 - 用第二人称"你"，像一个懂他的朋友在回信。
-- 一页长信的篇幅，分几个自然段，铺陈细节、情绪的走向，以及一点真诚的反思或看见。
-- 从这些零散记录里读出今天的情绪基调、在意的事、隐约的纠结或微小的欢喜。
+- 篇幅简短克制：2-3 个短自然段，整体控制在 150-280 字。点到情绪和一点真诚的看见即可，不要铺陈、不要凑字数。
+- 从这些零散记录里读出今天的情绪基调、在意的事、隐约的纠结或微小的欢喜，挑最值得说的写，不必面面俱到。
 - 不要罗列任务清单，不要用"待办/已完成/提醒"这类分类标题。
 - 不要编造记录里没有的事，但可以温柔地延伸、共情与体察。
 - 结尾用一两句话给他一点轻轻的鼓励或祝福，不煽情、不说教。
@@ -216,6 +227,21 @@ export async function generateDailyLetter(entries, settings, date) {
   )
 }
 
+// Strip any leading bullets / checkboxes / numbering, in any order or repetition
+function stripItemPrefix(line) {
+  let s = line, prev
+  do {
+    prev = s
+    s = s
+      .replace(/^[-*]\s*/, '')
+      .replace(/^\[[ xX✓✔]\]\s*/, '')
+      .replace(/^[☐☑]\s*/, '')
+      .replace(/^\d+[.)、]\s*/, '')
+      .trim()
+  } while (s !== prev)
+  return s.replace(/\*\*/g, '').trim()
+}
+
 // Parse all typed items from AI summary text
 export function extractAllFromSummary(text) {
   const sections = [
@@ -226,7 +252,7 @@ export function extractAllFromSummary(text) {
     { emoji: '💭', type: 'thought',  done: false }
   ]
 
-  const items = []
+  const byText = new Map()
   for (const { emoji, type, done } of sections) {
     const re = new RegExp(`###[^\\n]*${emoji}[^\\n]*\\n([\\s\\S]*?)(?=###|$)`)
     const match = text.match(re)
@@ -234,9 +260,14 @@ export function extractAllFromSummary(text) {
     match[1]
       .split('\n')
       .filter(l => l.trim().startsWith('-'))
-      .map(l => l.replace(/^-\s*/, '').replace(/\*\*/g, '').trim())
+      .map(stripItemPrefix)
       .filter(Boolean)
-      .forEach(t => items.push({ type, text: t, done: !!done }))
+      .forEach(t => {
+        const key = t.replace(/\s+/g, '').toLowerCase()
+        const existing = byText.get(key)
+        if (!existing) byText.set(key, { type, text: t, done: !!done })
+        else if (done && !existing.done) existing.done = true   // 完成优先：任何板块标了完成即视为完成
+      })
   }
-  return items
+  return [...byText.values()]
 }
